@@ -1,20 +1,21 @@
 package com.simpath.app.token.refresh.entity;
 
 import jakarta.persistence.*;
-import lombok.Getter;
-import lombok.Setter;
+import lombok.*;
 import org.hibernate.annotations.UuidGenerator;
 
 import java.time.Instant;
 import java.util.UUID;
 
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
 @Entity
 @Table(name = "refresh_tokens", indexes = {
         @Index(name = "idx_refresh_user", columnList = "user_id"),
         @Index(name = "idx_refresh_family", columnList = "family_id")
 })
-@Getter
-@Setter
 public class RefreshToken {
     @Id
     @UuidGenerator

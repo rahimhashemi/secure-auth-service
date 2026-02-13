@@ -1,19 +1,21 @@
 package com.simpath.app.audit;
 
 import jakarta.persistence.*;
-import lombok.Getter;
-import lombok.Setter;
+import lombok.*;
 
 import java.time.Instant;
 import java.util.UUID;
 
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
 @Entity
 @Table(name = "audit_events", indexes = {
         @Index(name = "idx_audit_user", columnList = "userId"),
         @Index(name = "idx_audit_type", columnList = "type")
 })
-@Getter
-@Setter
+
 public class AuditEvent {
 
     @Id
@@ -38,5 +40,7 @@ public class AuditEvent {
         if (id == null) id = UUID.randomUUID();
         if (at == null) at = Instant.now();
     }
+
+
 
 }
