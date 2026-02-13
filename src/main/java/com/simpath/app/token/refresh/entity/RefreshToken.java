@@ -1,6 +1,9 @@
 package com.simpath.app.token.refresh.entity;
 
 import jakarta.persistence.*;
+import lombok.Getter;
+import lombok.Setter;
+import org.hibernate.annotations.UuidGenerator;
 
 import java.time.Instant;
 import java.util.UUID;
@@ -10,8 +13,12 @@ import java.util.UUID;
         @Index(name = "idx_refresh_user", columnList = "user_id"),
         @Index(name = "idx_refresh_family", columnList = "family_id")
 })
+@Getter
+@Setter
 public class RefreshToken {
     @Id
+    @UuidGenerator
+    @Column(columnDefinition = "uuid")
     private UUID id;
 
     @Column(nullable = false)
@@ -31,4 +38,10 @@ public class RefreshToken {
     private UUID replacedBy; // token id that replaced this one (rotation)
     private String userAgent;
     private String ip;
+
+    @PrePersist
+    void prePersist() {
+        if (id == null) id = UUID.randomUUID();
+        if (issuedAt == null) issuedAt = Instant.now();
+    }
 }

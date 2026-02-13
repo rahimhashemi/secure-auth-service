@@ -1,3 +1,41 @@
 spring:
   application:
     name: secure-auth-service
+
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/authdb}
+    username: ${SPRING_DATASOURCE_USERNAME:auth}
+    password: ${SPRING_DATASOURCE_PASSWORD:authpass}
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: update
+      properties:
+        hibernate:
+          dialect: org.hibernate.dialect.PostgreSQLDialect
+          jdbc:
+            time_zone: UTC
+    show-sql: true
+  jackson:
+    time-zone: UTC
+
+server:
+  port: 8080
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+app:
+  jwt:
+    issuer: "secure-auth-service"
+    # 32+ chars secret for HS256 (in real world use env/secret manager)
+    secret: ${APP_JWT_SECRET:qZ3k8z9wX2fYpTq4LkM1N0aBcDeFgHiJkLmNoPqRsTu=}
+    access-ttl-minutes: 15
+    refresh-ttl-days: 14
+  refresh-token:
+    # server-side pepper to hash refresh tokens (keep in env)
+    pepper: ${APP_REFRESH_PEPPER:pepper-change-me}
