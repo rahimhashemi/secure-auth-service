@@ -1,9 +1,6 @@
 package com.simpath.app.auth.controller;
 
-import com.simpath.app.auth.dto.AuthResponse;
-import com.simpath.app.auth.dto.LoginRequest;
-import com.simpath.app.auth.dto.RefreshRequest;
-import com.simpath.app.auth.dto.RegisterRequest;
+import com.simpath.app.auth.dto.*;
 import com.simpath.app.auth.service.AuthService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
@@ -36,4 +33,15 @@ public class AuthController {
     public AuthResponse refresh(@Valid @RequestBody RefreshRequest req, HttpServletRequest http) {
         return auth.refresh(req, http.getHeader("User-Agent"), http.getRemoteAddr());
     }
+
+    @PostMapping("/logout")
+    public void logout(@Valid @RequestBody LogoutRequest req, HttpServletRequest http) {
+        auth.logout(req, http.getHeader("User-Agent"), http.getRemoteAddr());
+    }
+
+    @PostMapping("/logout-all")
+    public void logoutAll(@Valid @RequestBody LogoutRequest req, HttpServletRequest http) {
+        auth.logoutAll(req, http.getHeader("User-Agent"), http.getRemoteAddr());
+    }
+
 }

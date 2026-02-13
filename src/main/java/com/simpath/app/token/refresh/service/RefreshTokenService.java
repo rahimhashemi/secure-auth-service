@@ -1,5 +1,6 @@
 package com.simpath.app.token.refresh.service;
 
+import com.simpath.app.common.InvalidRefreshTokenException;
 import com.simpath.app.token.refresh.entity.RefreshToken;
 import com.simpath.app.token.refresh.repo.RefreshTokenRepository;
 import org.springframework.beans.factory.annotation.Value;
@@ -52,12 +53,18 @@ public class RefreshTokenService {
 
         if (current == null) {
             // Reuse or unknown token: in a real system you might revoke all sessions for the user
-            throw new IllegalArgumentException("Invalid refresh token (possible reuse).");
+            throw new InvalidRefreshTokenException("Invalid refresh token (possible reuse).");
+        }
+
+        // اگر قبلاً revoke شده یا rotate شده و دوباره استفاده شد => reuse
+        if (current.getRevokedAt() != null || current.getReplacedBy() != null) {
+            revokeAll(current.getUserId()); // واکنش امنیتی شدید
+            throw new InvalidRefreshTokenException("Refresh token reuse detected. All sessions revoked.");
         }
 
 //        if (!current.isActiveAt(now)) {
 //            // If it's revoked/expired, also treat as invalid
-//            throw new IllegalArgumentException("Refresh token expired or revoked.");
+//            throw new InvalidRefreshTokenException("Refresh token expired or revoked.");
 //        }
 
         // Revoke current & rotate
@@ -97,6 +104,22 @@ public class RefreshTokenService {
         repo.saveAll(tokens);
     }
 
+    @Transactional
+    public void revokeByRefreshToken(String refreshTokenPlain) {
+        Instant now = Instant.now();
+        String hash = hasher.hash(refreshTokenPlain);
+
+        RefreshToken current = repo.findByTokenHash(hash).orElseThrow(() ->
+                new IllegalArgumentException("Invalid refresh token.")
+        );
+
+        if (current.getRevokedAt() == null) {
+            current.setRevokedAt(now);
+            repo.save(current);
+        }
+    }
+
+
     private IssuedRefresh createAndPersist(UUID userId, UUID familyId, String userAgent, String ip) {
         Instant now = Instant.now();
         Instant exp = now.plus(refreshTtlDays, ChronoUnit.DAYS);
@@ -124,4 +147,12 @@ public class RefreshTokenService {
         random.nextBytes(bytes);
         return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
     }
+
+    public UUID getUserIdFromRefresh(String refreshTokenPlain) {
+        String hash = hasher.hash(refreshTokenPlain);
+        return repo.findByTokenHash(hash)
+                .map(RefreshToken::getUserId)
+                .orElseThrow(() -> new IllegalArgumentException("Invalid refresh token."));
+    }
+
 }
