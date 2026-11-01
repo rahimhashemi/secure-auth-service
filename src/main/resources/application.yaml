@@ -13,9 +13,17 @@ spring:
     password: ${SPRING_DATASOURCE_PASSWORD:authpass}
     driver-class-name: org.postgresql.Driver
 
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: false
+    clean-disabled: true
+    validate-on-migrate: true
+    validate-migration-naming: true
+
   jpa:
     hibernate:
-      ddl-auto: update
+      ddl-auto: validate
       properties:
         hibernate:
           dialect: org.hibernate.dialect.PostgreSQLDialect
@@ -50,4 +58,5 @@ app:
   refresh-token:
     # server-side pepper to hash refresh tokens (keep in env)
     pepper: ${APP_REFRESH_PEPPER}
+
 

@@ -10,6 +10,8 @@ import com.simpath.app.token.refresh.service.RefreshTokenService;
 import com.simpath.app.user.entity.User;
 import com.simpath.app.user.repo.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
+import org.flywaydb.core.Flyway;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.annotation.DirtiesContext;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -35,7 +37,7 @@ import static org.assertj.core.api.Assertions.*;
     "app.jwt.secret=test-only-key-with-at-least-thirty-two-characters",
     "app.refresh-token.pepper=test-only-pepper",
     "app.rate-limit.login-limit=3", "app.rate-limit.refresh-limit=2",
-    "spring.jpa.hibernate.ddl-auto=create-drop", "spring.jpa.show-sql=false"
+    "spring.jpa.show-sql=false"
 })
 @Import(AuthIntegrationTest.Containers.class)
 @AutoConfigureMockMvc
@@ -59,6 +61,8 @@ class AuthIntegrationTest {
     }
 
     @Autowired MockMvc mvc;
+    @Autowired Flyway flyway;
+    @Autowired JdbcTemplate jdbc;
     @Autowired AuthService auth;
     @Autowired RefreshTokenService refresh;
     @Autowired RefreshTokenRepository tokens;
@@ -158,5 +162,14 @@ class AuthIntegrationTest {
                 .contentType(MediaType.APPLICATION_JSON).content("{}"))
                 .andExpect(status().isBadRequest());
     }
+
+    @Test void applicationStartsAgainstFlywaySchemaWithoutHibernateCreatingTables() {
+        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("1");
+        assertThat(flyway.info().pending()).isEmpty();
+        assertThat(jdbc.queryForObject(
+                "select count(*) from flyway_schema_history where version = '1' and success = true", Integer.class))
+                .isEqualTo(1);
+    }
 }
+
 
