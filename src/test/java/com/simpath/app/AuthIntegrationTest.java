@@ -10,6 +10,9 @@ import com.simpath.app.token.refresh.service.RefreshTokenService;
 import com.simpath.app.user.entity.User;
 import com.simpath.app.user.repo.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.AfterAll;
+import org.springframework.context.ConfigurableApplicationContext;
+import org.springframework.test.annotation.DirtiesContext;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -38,11 +41,20 @@ import static org.assertj.core.api.Assertions.*;
 })
 @Testcontainers
 @AutoConfigureMockMvc
+@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 class AuthIntegrationTest {
     @Container static final PostgreSQLContainer<?> DB = new PostgreSQLContainer<>("postgres:16-alpine");
     @Container static final GenericContainer<?> REDIS = new GenericContainer<>(DockerImageName.parse("redis:7-alpine"))
             .withExposedPorts(6379);
     @Autowired MockMvc mvc;
+
+    // JUnit invokes this before Testcontainers' afterAll callback stops the containers.
+    // Close Lettuce and Hikari while their servers still exist, then evict the closed context.
+    @AfterAll
+    static void closeApplicationContext(@Autowired ConfigurableApplicationContext context) {
+        context.close();
+    }
+
     @DynamicPropertySource static void database(DynamicPropertyRegistry registry) {
         registry.add("spring.data.redis.host", REDIS::getHost);
         registry.add("spring.data.redis.port", () -> REDIS.getMappedPort(6379));
