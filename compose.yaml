@@ -16,6 +16,11 @@ services:
 
   redis:
     image: redis:7
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
     ports:
       - "127.0.0.1:6379:6379"
 
@@ -26,6 +31,10 @@ services:
       SPRING_DATASOURCE_USERNAME: auth
       SPRING_DATASOURCE_PASSWORD: authpass
       SPRING_DATA_REDIS_HOST: redis
+      APP_RATE_LIMIT_ENABLED: ${APP_RATE_LIMIT_ENABLED:-true}
+      APP_RATE_LIMIT_LOGIN_LIMIT: ${APP_RATE_LIMIT_LOGIN_LIMIT:-10}
+      APP_RATE_LIMIT_REFRESH_LIMIT: ${APP_RATE_LIMIT_REFRESH_LIMIT:-30}
+      APP_RATE_LIMIT_WINDOW_SECONDS: ${APP_RATE_LIMIT_WINDOW_SECONDS:-60}
       APP_JWT_SECRET: ${APP_JWT_SECRET:?Set APP_JWT_SECRET}
       APP_REFRESH_PEPPER: ${APP_REFRESH_PEPPER:?Set APP_REFRESH_PEPPER}
 
@@ -35,5 +44,6 @@ services:
       postgres:
         condition: service_healthy
       redis:
-        condition: service_started
+        condition: service_healthy
+
 

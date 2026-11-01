@@ -1,6 +1,8 @@
 package com.simpath.app.config;
 
 import com.simpath.app.token.token.JwtAuthFilter;
+import com.simpath.app.security.RateLimitFilter;
+import com.simpath.app.security.RateLimitService;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -15,9 +17,11 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 public class SecurityConfig {
 
     private final JwtAuthFilter jwtAuthFilter;
+    private final RateLimitService rateLimits;
 
-    public SecurityConfig(JwtAuthFilter jwtAuthFilter) {
+    public SecurityConfig(JwtAuthFilter jwtAuthFilter, RateLimitService rateLimits) {
         this.jwtAuthFilter = jwtAuthFilter;
+        this.rateLimits = rateLimits;
     }
 
     @Bean
@@ -37,6 +41,8 @@ public class SecurityConfig {
                 )
                 .httpBasic(AbstractHttpConfigurer::disable)
                 .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class)
+                .addFilterBefore(new RateLimitFilter(rateLimits), JwtAuthFilter.class)
                 .build();
     }
 }
+

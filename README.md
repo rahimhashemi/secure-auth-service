@@ -14,6 +14,7 @@ This is a portfolio project, not a production-ready identity provider.
 - Logout of a refresh token and logout of all refresh sessions using an active refresh token.
 - Audit events in independent transactions, including failed login and refresh reuse.
 - Swagger UI and a protected `/me` endpoint.
+- Shared Redis rate limits for login and refresh, with HTTP 429 and Retry-After.
 
 ## Run locally
 
@@ -27,8 +28,8 @@ docker compose up --build
 ```
 
 The Dockerfile builds the JAR; no prebuilt `target` directory is required.
-PostgreSQL and Redis ports are bound to localhost. Redis is included for future
-experiments and is not currently used for rate limiting.
+PostgreSQL and Redis ports are bound to localhost. Redis is required for login
+and refresh rate limiting and Compose waits for its health check.
 
 - API: http://localhost:8080
 - Swagger: http://localhost:8080/swagger-ui.html
@@ -80,14 +81,50 @@ already issued access tokens. They remain usable until JWT expiry.
 Audit entries use independent transactions. Success entries describe an attempted
 operation and can remain if the surrounding transaction subsequently fails.
 
+## Login and refresh rate limits
+
+By default each socket peer IP gets separate budgets of **10 login attempts** and
+**30 refresh attempts** in a **60-second fixed window**, starting at the first request.
+All POST attempts count, including successful, invalid, and malformed requests.
+Other endpoints are not covered. Redis executes the check, increment, and expiry
+atomically so multiple application instances share the same budget. Redis keys use
+SHA-256 of the address and never include passwords, email addresses, or tokens.
+An address hash is pseudonymous, not anonymous.
+
+- Exhausted budget: `429`, JSON code `RATE_LIMIT_EXCEEDED`, and `Retry-After` in seconds.
+- Redis failure: `503`, JSON code `RATE_LIMIT_UNAVAILABLE`; login and refresh fail closed.
+- Rejected attempts do not extend the window. Budget resets when the Redis key expires.
+- Fixed windows allow bursts near window boundaries; this is not a sliding-window limiter.
+- Redis command and connect timeouts default to one second each.
+
+Configuration (also forwarded by Compose):
+
+| Environment variable | Default |
+| --- | --- |
+| `APP_RATE_LIMIT_ENABLED` | `true` |
+| `APP_RATE_LIMIT_LOGIN_LIMIT` | `10` |
+| `APP_RATE_LIMIT_REFRESH_LIMIT` | `30` |
+| `APP_RATE_LIMIT_WINDOW_SECONDS` | `60` |
+
+Limits must be positive and window size must be 1..86400 seconds. Disabling the
+limiter explicitly bypasses Redis checks. All instances must use the same Redis
+database and settings. Redis restarts, eviction, or data loss can reset budgets.
+
+Forwarded headers are disabled and client-supplied `X-Forwarded-For` / `Forwarded`
+are ignored. Behind a reverse proxy, requests share the proxy address budget until
+trusted-ingress address handling is deliberately configured. Clients sharing a NAT
+also share a budget. IP rotation/distributed attacks can bypass IP-only limits;
+per-account controls and edge protection remain future work. No account lockout is
+implemented. Do not enable arbitrary forwarded-header trust on an internet-facing app.
+
 ## Tests
 
 ```bash
-# Full suite: Docker required for PostgreSQL Testcontainers
+# Full suite: Docker required for PostgreSQL and Redis Testcontainers
 bash mvnw -B verify
 
-# JWT filter regression tests without Docker
-bash mvnw -B -Dtest=JwtAuthFilterTest test
+# Filter regression tests without Docker
+bash mvnw -B -Dtest=JwtAuthFilterTest,RateLimitFilterTest test
 ```
 
 The PostgreSQL integration suite covers expired refresh rejection, rotation and
@@ -96,11 +133,17 @@ audit persistence, and rejection of stale tokens for logout-all. Filter tests ch
 invalid-token rejection and propagation of downstream failures. CI runs the full suite;
 it does not silently skip database tests when Docker is absent.
 
+Rate-limit tests cover real Redis expiry, exact thresholds, separate IP/operation
+buckets, 40 concurrent attempts through two independent Redis clients, HTTP filter
+wiring, malformed request counting, forwarded-header spoofing, 429 headers, and
+fail-closed behavior when Redis is unavailable.
+
 ## Remaining limitations
 
-- No rate limiting, MFA, email verification, password reset, or OAuth2/OIDC support.
+- No per-account throttling, registration throttling, MFA, email verification, password reset, or OAuth2/OIDC support.
 - Hibernate `ddl-auto: update` is used for development; versioned migrations are needed.
 - No immediate access-token revocation or automatic expired-token cleanup.
 - Database locks serialize session operations per user, with no custom lock timeout policy.
 - Registration normalization/concurrency behavior and broader HTTP endpoint coverage need work.
 - Deployment hardening, TLS, browser credential storage and CSRF policy require a deployment-specific review.
+
