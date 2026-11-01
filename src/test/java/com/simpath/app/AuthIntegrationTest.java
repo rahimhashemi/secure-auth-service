@@ -10,12 +10,14 @@ import com.simpath.app.token.refresh.service.RefreshTokenService;
 import com.simpath.app.user.entity.User;
 import com.simpath.app.user.repo.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.AfterAll;
-import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.test.annotation.DirtiesContext;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Import;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.http.MediaType;
@@ -23,11 +25,7 @@ import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.utility.DockerImageName;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.PostgreSQLContainer;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
 import java.time.Instant;
 import java.util.UUID;
 import java.util.concurrent.*;
@@ -39,29 +37,28 @@ import static org.assertj.core.api.Assertions.*;
     "app.rate-limit.login-limit=3", "app.rate-limit.refresh-limit=2",
     "spring.jpa.hibernate.ddl-auto=create-drop", "spring.jpa.show-sql=false"
 })
-@Testcontainers
+@Import(AuthIntegrationTest.Containers.class)
 @AutoConfigureMockMvc
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 class AuthIntegrationTest {
-    @Container static final PostgreSQLContainer<?> DB = new PostgreSQLContainer<>("postgres:16-alpine");
-    @Container static final GenericContainer<?> REDIS = new GenericContainer<>(DockerImageName.parse("redis:7-alpine"))
-            .withExposedPorts(6379);
+    @TestConfiguration(proxyBeanMethods = false)
+    static class Containers {
+        // Spring starts container beans first and stops them after dependent clients.
+        @Bean
+        @ServiceConnection
+        PostgreSQLContainer<?> postgres() {
+            return new PostgreSQLContainer<>("postgres:16-alpine");
+        }
+
+        @Bean
+        @ServiceConnection(name = "redis")
+        GenericContainer<?> redis() {
+            return new GenericContainer<>(DockerImageName.parse("redis:7-alpine"))
+                    .withExposedPorts(6379);
+        }
+    }
+
     @Autowired MockMvc mvc;
-
-    // JUnit invokes this before Testcontainers' afterAll callback stops the containers.
-    // Close Lettuce and Hikari while their servers still exist, then evict the closed context.
-    @AfterAll
-    static void closeApplicationContext(@Autowired ConfigurableApplicationContext context) {
-        context.close();
-    }
-
-    @DynamicPropertySource static void database(DynamicPropertyRegistry registry) {
-        registry.add("spring.data.redis.host", REDIS::getHost);
-        registry.add("spring.data.redis.port", () -> REDIS.getMappedPort(6379));
-        registry.add("spring.datasource.url", DB::getJdbcUrl);
-        registry.add("spring.datasource.username", DB::getUsername);
-        registry.add("spring.datasource.password", DB::getPassword);
-    }
     @Autowired AuthService auth;
     @Autowired RefreshTokenService refresh;
     @Autowired RefreshTokenRepository tokens;
