@@ -13,6 +13,13 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.http.MediaType;
+import org.testcontainers.containers.GenericContainer;
+import org.testcontainers.utility.DockerImageName;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.PostgreSQLContainer;
@@ -26,12 +33,19 @@ import static org.assertj.core.api.Assertions.*;
 @SpringBootTest(properties = {
     "app.jwt.secret=test-only-key-with-at-least-thirty-two-characters",
     "app.refresh-token.pepper=test-only-pepper",
+    "app.rate-limit.login-limit=3", "app.rate-limit.refresh-limit=2",
     "spring.jpa.hibernate.ddl-auto=create-drop", "spring.jpa.show-sql=false"
 })
 @Testcontainers
+@AutoConfigureMockMvc
 class AuthIntegrationTest {
     @Container static final PostgreSQLContainer<?> DB = new PostgreSQLContainer<>("postgres:16-alpine");
+    @Container static final GenericContainer<?> REDIS = new GenericContainer<>(DockerImageName.parse("redis:7-alpine"))
+            .withExposedPorts(6379);
+    @Autowired MockMvc mvc;
     @DynamicPropertySource static void database(DynamicPropertyRegistry registry) {
+        registry.add("spring.data.redis.host", REDIS::getHost);
+        registry.add("spring.data.redis.port", () -> REDIS.getMappedPort(6379));
         registry.add("spring.datasource.url", DB::getJdbcUrl);
         registry.add("spring.datasource.username", DB::getUsername);
         registry.add("spring.datasource.password", DB::getPassword);
@@ -105,4 +119,35 @@ class AuthIntegrationTest {
             .isInstanceOf(InvalidRefreshTokenException.class);
         assertThat(refresh.getUserIdFromRefresh(next.refreshToken())).isEqualTo(userId);
     }
+
+    @Test void loginHttpLimitIsAppliedExactlyOncePerRequest() throws Exception {
+        String ip = "192.0.2.30";
+        for (int i = 0; i < 3; i++) {
+            mvc.perform(post("/auth/login").with(request -> { request.setRemoteAddr(ip); return request; })
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"email\":\"rahim@example.com\",\"password\":\"wrong\"}"))
+                    .andExpect(status().isBadRequest());
+        }
+        mvc.perform(post("/auth/login").with(request -> { request.setRemoteAddr(ip); return request; })
+                .contentType(MediaType.APPLICATION_JSON).content("{}"))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(header().exists("Retry-After"))
+                .andExpect(jsonPath("$.code").value("RATE_LIMIT_EXCEEDED"));
+    }
+
+    @Test void malformedRefreshConsumesCapacityButOtherAddressesAreIndependent() throws Exception {
+        for (int i = 0; i < 2; i++) {
+            mvc.perform(post("/auth/refresh").with(request -> { request.setRemoteAddr("192.0.2.31"); return request; })
+                    .contentType(MediaType.APPLICATION_JSON).content("{}"))
+                    .andExpect(status().isBadRequest());
+        }
+        mvc.perform(post("/auth/refresh").with(request -> { request.setRemoteAddr("192.0.2.31"); return request; })
+                .header("X-Forwarded-For", "198.51.100.1")
+                .contentType(MediaType.APPLICATION_JSON).content("{}"))
+                .andExpect(status().isTooManyRequests());
+        mvc.perform(post("/auth/refresh").with(request -> { request.setRemoteAddr("192.0.2.32"); return request; })
+                .contentType(MediaType.APPLICATION_JSON).content("{}"))
+                .andExpect(status().isBadRequest());
+    }
 }
+

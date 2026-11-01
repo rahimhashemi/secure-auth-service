@@ -2,6 +2,11 @@ spring:
   application:
     name: secure-auth-service
 
+  data:
+    redis:
+      connect-timeout: 1s
+      timeout: 1s
+
   datasource:
     url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/authdb}
     username: ${SPRING_DATASOURCE_USERNAME:auth}
@@ -22,6 +27,7 @@ spring:
 
 server:
   port: 8080
+  forward-headers-strategy: none
 
 management:
   endpoints:
@@ -30,6 +36,11 @@ management:
         include: health,info
 
 app:
+  rate-limit:
+    enabled: ${APP_RATE_LIMIT_ENABLED:true}
+    login-limit: ${APP_RATE_LIMIT_LOGIN_LIMIT:10}
+    refresh-limit: ${APP_RATE_LIMIT_REFRESH_LIMIT:30}
+    window-seconds: ${APP_RATE_LIMIT_WINDOW_SECONDS:60}
   jwt:
     issuer: "secure-auth-service"
     # 32+ chars secret for HS256 (in real world use env/secret manager)
@@ -39,3 +50,4 @@ app:
   refresh-token:
     # server-side pepper to hash refresh tokens (keep in env)
     pepper: ${APP_REFRESH_PEPPER}
+
