@@ -33,9 +33,9 @@ app:
   jwt:
     issuer: "secure-auth-service"
     # 32+ chars secret for HS256 (in real world use env/secret manager)
-    secret: ${APP_JWT_SECRET:qZ3k8z9wX2fYpTq4LkM1N0aBcDeFgHiJkLmNoPqRsTu=}
+    secret: ${APP_JWT_SECRET}
     access-ttl-minutes: 15
     refresh-ttl-days: 14
   refresh-token:
     # server-side pepper to hash refresh tokens (keep in env)
-    pepper: ${APP_REFRESH_PEPPER:pepper-change-me}
+    pepper: ${APP_REFRESH_PEPPER}

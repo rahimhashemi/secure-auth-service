@@ -13,7 +13,7 @@ public class AuditService {
         this.repo = repo;
     }
 
-    @Transactional
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.REQUIRES_NEW)
     public void log(String type, UUID userId, String detail, String ip, String userAgent) {
         AuditEvent e = new AuditEvent();
         e.setType(type);
@@ -24,3 +24,4 @@ public class AuditService {
         repo.save(e);
     }
 }
+
