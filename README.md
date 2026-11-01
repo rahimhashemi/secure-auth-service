@@ -1,261 +1,106 @@
+# Secure Auth Service
 
-# Secure Auth Service (Spring Boot)
+A Java 17 / Spring Boot authentication sample with PostgreSQL-backed sessions.
+This is a portfolio project, not a production-ready identity provider.
 
-Production-style authentication service built with **Spring Boot 3 / Java 17**, implementing:
+## Implemented
 
-* Stateless JWT access tokens
-* Refresh token rotation
-* Reuse detection
-* Server-side revocation
-* Audit logging
-* Integration tests with Testcontainers
+- BCrypt password hashing and signed, short-lived JWT access tokens.
+- Random 384-bit opaque refresh tokens; only peppered hashes are stored.
+- Refresh token expiration checks and rotation within a session family.
+- Reuse detection that revokes all refresh sessions for the user.
+- Database user-row locks serialize session mutations across application instances.
+- Disabled users cannot obtain new tokens through refresh.
+- Logout of a refresh token and logout of all refresh sessions using an active refresh token.
+- Audit events in independent transactions, including failed login and refresh reuse.
+- Swagger UI and a protected `/me` endpoint.
 
-Designed as a foundation for secure, distributed backend systems (FinTech-ready).
+## Run locally
 
----
-
-# 🚀 Features
-
-### 🔐 Authentication
-
-* Email/password authentication
-* BCrypt password hashing
-* Stateless JWT access tokens (short-lived)
-
-### 🔄 Refresh Token Strategy
-
-* Opaque refresh tokens (not JWT)
-* **Hashed storage (SHA-256 + server-side pepper)**
-* Rotation on every refresh
-* Reuse detection
-* Session family tracking
-* Logout / Logout-all support
-
-### 🛡 Security Controls
-
-* Token reuse detection triggers session revocation
-* Refresh tokens never stored in plaintext
-* Stateless access tokens
-* CSRF-safe (API-first design)
-* Audit trail for auth-related events
-
-### 📜 Audit Logging
-
-Tracks:
-
-* LOGIN_SUCCESS / LOGIN_FAIL
-* REFRESH_SUCCESS / REFRESH_FAIL
-* REFRESH_REUSE
-* LOGOUT
-* LOGOUT_ALL
-
-### 🧪 Integration Testing
-
-* Postgres via Testcontainers
-* Full login → refresh → reuse detection flow covered
-
----
-
-# 🏗 Architecture
-
-```
-Client
-   |
-   |  (1) Login
-   v
-AuthController
-   |
-   v
-AuthService
-   |
-   |----> UserRepository (Postgres)
-   |----> RefreshTokenService
-               |
-               |----> RefreshTokenRepository (Postgres)
-               |----> RefreshTokenHasher (SHA-256 + pepper)
-   |
-   |----> JwtService (HS256)
-   |
-   |----> AuditService
-```
-
-### Token Model
-
-Access Token:
-
-* JWT (15 min default)
-* Stateless
-* Contains userId + email
-
-Refresh Token:
-
-* 384-bit secure random opaque token
-* Hashed before storage
-* Stored with:
-
-    * familyId (session group)
-    * revokedAt
-    * replacedBy
-    * expiresAt
-
----
-
-# 🔄 Refresh Token Rotation Logic
-
-1. Client sends refresh token
-2. Server hashes token
-3. Lookup in DB
-4. If:
-
-    * Not found → invalid
-    * Already revoked or replaced → **reuse detected**
-5. On valid refresh:
-
-    * Current token revoked
-    * New refresh token issued
-    * Access token re-issued
-
-If reuse detected:
-
-* All user sessions revoked (configurable)
-* Event logged
-
----
-
-# 🔎 Threat Model (Simplified)
-
-| Threat                     | Mitigation                 |
-| -------------------------- | -------------------------- |
-| Stolen refresh token reuse | Rotation + reuse detection |
-| DB leak                    | Refresh tokens hashed      |
-| Access token replay        | Short TTL                  |
-| Session fixation           | Rotation strategy          |
-| Horizontal scaling issues  | Stateless access tokens    |
-
----
-
-# ▶ Running Locally
+Requires Docker Engine / Docker Desktop and Docker Compose v2. Generate local secrets
+and keep them outside source control:
 
 ```bash
+export APP_JWT_SECRET="$(openssl rand -hex 32)"
+export APP_REFRESH_PEPPER="$(openssl rand -hex 32)"
 docker compose up --build
 ```
 
-Service:
+The Dockerfile builds the JAR; no prebuilt `target` directory is required.
+PostgreSQL and Redis ports are bound to localhost. Redis is included for future
+experiments and is not currently used for rate limiting.
 
-```
-http://localhost:8080
-```
+- API: http://localhost:8080
+- Swagger: http://localhost:8080/swagger-ui.html
+- Health: http://localhost:8080/actuator/health
 
----
+JWT secret and refresh pepper are required configuration. The JWT secret must have
+at least 32 UTF-8 bytes. The development database credentials in Compose are local
+examples. Changing the pepper invalidates existing refresh tokens; changing the JWT
+key invalidates existing access tokens. Key rotation is not implemented.
 
-# 📡 API Examples
-
-### Register
+## API examples
 
 ```bash
 curl -X POST localhost:8080/auth/register \
-  -H "Content-Type: application/json" \
+  -H 'Content-Type: application/json' \
   -d '{"email":"test@example.com","password":"Passw0rd!"}'
-```
 
-### Login
-
-```bash
 curl -X POST localhost:8080/auth/login \
-  -H "Content-Type: application/json" \
+  -H 'Content-Type: application/json' \
   -d '{"email":"test@example.com","password":"Passw0rd!"}'
-```
 
-### Call Protected Endpoint
+curl localhost:8080/me -H 'Authorization: Bearer <ACCESS_TOKEN>'
 
-```bash
-curl localhost:8080/me \
-  -H "Authorization: Bearer <ACCESS_TOKEN>"
-```
-
-### Refresh
-
-```bash
 curl -X POST localhost:8080/auth/refresh \
-  -H "Content-Type: application/json" \
+  -H 'Content-Type: application/json' \
   -d '{"refreshToken":"<REFRESH_TOKEN>"}'
-```
 
-### Logout
-
-```bash
 curl -X POST localhost:8080/auth/logout \
-  -H "Content-Type: application/json" \
+  -H 'Content-Type: application/json' \
   -d '{"refreshToken":"<REFRESH_TOKEN>"}'
 ```
 
----
+`POST /auth/logout-all` accepts the same request body and requires an active,
+unexpired refresh token.
 
-# 🧪 Tests
+## Token and transaction behavior
 
-Run:
+Access tokens expire after 15 minutes by default. Refresh tokens expire 14 days
+after issuance; rotation renews that lifetime. There is no absolute session lifetime.
+
+A reused refresh token revokes **all refresh sessions** for its user. This change
+commits even though the request returns 401. Clients must serialize refresh requests:
+two concurrent requests using the same token cause one rotation and then reuse
+revocation, so the returned successor is also revoked.
+
+Logout, reuse revocation, and account disablement do not immediately invalidate
+already issued access tokens. They remain usable until JWT expiry.
+
+Audit entries use independent transactions. Success entries describe an attempted
+operation and can remain if the surrounding transaction subsequently fails.
+
+## Tests
 
 ```bash
-mvn test
+# Full suite: Docker required for PostgreSQL Testcontainers
+bash mvnw -B verify
+
+# JWT filter regression tests without Docker
+bash mvnw -B -Dtest=JwtAuthFilterTest test
 ```
 
-Covers:
+The PostgreSQL integration suite covers expired refresh rejection, rotation and
+persisted reuse revocation, concurrent refresh attempts, disabled users, failed-login
+audit persistence, and rejection of stale tokens for logout-all. Filter tests check
+invalid-token rejection and propagation of downstream failures. CI runs the full suite;
+it does not silently skip database tests when Docker is absent.
 
-* Login flow
-* Refresh rotation
-* Reuse detection
-* Protected endpoint access
+## Remaining limitations
 
-Uses:
-
-* Testcontainers (Postgres)
-* Spring Boot integration testing
-
----
-
-# 🧠 Design Decisions
-
-Why opaque refresh tokens instead of JWT refresh?
-
-* Server-side control
-* Revocation support
-* Reuse detection
-* Reduced attack surface
-
-Why hash refresh tokens?
-
-* Prevent plaintext token exposure in case of DB leak
-* Similar principle to password storage
-
-Why stateless access tokens?
-
-* Horizontal scalability
-* No server memory dependency
-* Works well in distributed systems
-
----
-
-# 📈 Possible Extensions (Roadmap)
-
-* TOTP-based MFA
-* Device fingerprinting
-* OAuth2 / OpenID Connect support
-* Redis-based rate limiting
-* Prometheus metrics
-* Key rotation support
-* JWK endpoint
-
----
-
-# 👤 About the Author
-
-Senior Java Backend Engineer with 10+ years of experience building secure, scalable banking systems.
-
-Specialized in:
-
-* Distributed architecture
-* JWT & secure authentication
-* PKI / digital signatures
-* Enterprise modernization
-
----
+- No rate limiting, MFA, email verification, password reset, or OAuth2/OIDC support.
+- Hibernate `ddl-auto: update` is used for development; versioned migrations are needed.
+- No immediate access-token revocation or automatic expired-token cleanup.
+- Database locks serialize session operations per user, with no custom lock timeout policy.
+- Registration normalization/concurrency behavior and broader HTTP endpoint coverage need work.
+- Deployment hardening, TLS, browser credential storage and CSRF policy require a deployment-specific review.

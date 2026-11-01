@@ -41,8 +41,8 @@ public class AuthService {
 
     @Transactional
     public AuthResponse login(LoginRequest req, String userAgent, String ip) {
-        var email = req.email().trim();
-        var u = users.findByEmailIgnoreCase(email).orElse(null);
+        String email = req.email().trim();
+        User u = users.findByEmailIgnoreCase(email).orElse(null);
 
         if (u == null || !u.isEnabled() || !passwordService.matches(req.password(), u.getPasswordHash())) {
             audit.log("LOGIN_FAIL", u != null ? u.getId() : null, "invalid_credentials", ip, userAgent);
@@ -52,37 +52,38 @@ public class AuthService {
         audit.log("LOGIN_SUCCESS", u.getId(), null, ip, userAgent);
 
         String access = jwtService.issueAccessToken(u.getId(), u.getEmail());
-        var refresh = refreshTokenService.issueNew(u.getId(), userAgent, ip);
+        RefreshTokenService.IssuedRefresh refresh = refreshTokenService.issueNew(u.getId(), userAgent, ip);
 
         return new AuthResponse(access, jwtService.getAccessTtlSeconds(), refresh.refreshTokenPlain(), refresh.expiresInSeconds());
     }
 
-    @Transactional
+    @Transactional(noRollbackFor = InvalidRefreshTokenException.class)
     public AuthResponse refresh(RefreshRequest req, String userAgent, String ip) {
         try {
-            var rotated = refreshTokenService.rotate(req.refreshToken(), userAgent, ip);
-            var user = users.findById(rotated.userId()).orElseThrow();
+            RefreshTokenService.IssuedRefresh rotated = refreshTokenService.rotate(req.refreshToken(), userAgent, ip);
+            User user = users.findById(rotated.userId()).orElseThrow();
 
             audit.log("REFRESH_SUCCESS", user.getId(), null, ip, userAgent);
 
             String access = jwtService.issueAccessToken(user.getId(), user.getEmail());
             return new AuthResponse(access, jwtService.getAccessTtlSeconds(), rotated.refreshTokenPlain(), rotated.expiresInSeconds());
         } catch (InvalidRefreshTokenException ex) {
-            audit.log("REFRESH_FAIL", null, ex.getMessage(), ip, userAgent);
+            audit.log(ex.getMessage().contains("reuse detected") ? "REFRESH_REUSE" : "REFRESH_FAIL",
+                    null, ex.getMessage(), ip, userAgent);
             throw ex;
         }
     }
 
     @Transactional
     public void logout(LogoutRequest req, String userAgent, String ip) {
-        var userId = refreshTokenService.getUserIdFromRefresh(req.refreshToken());
+        java.util.UUID userId = refreshTokenService.getUserIdFromRefresh(req.refreshToken());
         refreshTokenService.revokeByRefreshToken(req.refreshToken());
         audit.log("LOGOUT", userId, null, ip, userAgent);
     }
 
     @Transactional
     public void logoutAll(LogoutRequest req, String userAgent, String ip) {
-        var userId = refreshTokenService.getUserIdFromRefresh(req.refreshToken());
+        java.util.UUID userId = refreshTokenService.getUserIdFromRefresh(req.refreshToken());
         refreshTokenService.revokeAll(userId);
         audit.log("LOGOUT_ALL", userId, null, ip, userAgent);
     }

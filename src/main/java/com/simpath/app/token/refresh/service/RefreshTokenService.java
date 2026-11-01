@@ -17,13 +17,15 @@ import java.util.UUID;
 @Service
 public class RefreshTokenService {
 
+    private final com.simpath.app.user.repo.UserRepository users;
     private final RefreshTokenRepository repo;
     private final RefreshTokenHasher hasher;
     private final long refreshTtlDays;
     private final SecureRandom random = new SecureRandom();
 
-    public RefreshTokenService(RefreshTokenRepository repo, RefreshTokenHasher hasher, @Value("${app.jwt.refresh-ttl-days}") long refreshTtlDays) {
+    public RefreshTokenService(RefreshTokenRepository repo, com.simpath.app.user.repo.UserRepository users, RefreshTokenHasher hasher, @Value("${app.jwt.refresh-ttl-days}") long refreshTtlDays) {
         this.repo = repo;
+        this.users = users;
         this.hasher = hasher;
         this.refreshTtlDays = refreshTtlDays;
     }
@@ -37,6 +39,7 @@ public class RefreshTokenService {
      */
     @Transactional
     public IssuedRefresh issueNew(UUID userId, String userAgent, String ip) {
+        lockUser(userId);
         UUID familyId = UUID.randomUUID();
         return createAndPersist(userId, familyId, userAgent, ip);
     }
@@ -44,11 +47,12 @@ public class RefreshTokenService {
     /**
      * Rotates refresh token inside the same family (same session).
      */
-    @Transactional
+    @Transactional(noRollbackFor = InvalidRefreshTokenException.class)
     public IssuedRefresh rotate(String refreshTokenPlain, String userAgent, String ip) {
-        Instant now = Instant.now();
         String hash = hasher.hash(refreshTokenPlain);
 
+        lockOwner(hash);
+        Instant now = Instant.now();
         RefreshToken current = repo.findByTokenHash(hash).orElse(null);
 
         if (current == null) {
@@ -62,10 +66,9 @@ public class RefreshTokenService {
             throw new InvalidRefreshTokenException("Refresh token reuse detected. All sessions revoked.");
         }
 
-//        if (!current.isActiveAt(now)) {
-//            // If it's revoked/expired, also treat as invalid
-//            throw new InvalidRefreshTokenException("Refresh token expired or revoked.");
-//        }
+        if (current.getExpiresAt() == null || !current.getExpiresAt().isAfter(now)) {
+            throw new InvalidRefreshTokenException("Refresh token expired.");
+        }
 
         // Revoke current & rotate
         current.setRevokedAt(now);
@@ -84,6 +87,7 @@ public class RefreshTokenService {
     @Transactional
     public void revokeFamily(UUID userId, UUID familyId) {
         Instant now = Instant.now();
+        lockUser(userId);
         List<RefreshToken> tokens = repo.findByUserIdAndFamilyId(userId, familyId);
         for (RefreshToken t : tokens) {
             if (t.getRevokedAt() == null) t.setRevokedAt(now);
@@ -97,6 +101,7 @@ public class RefreshTokenService {
     @Transactional
     public void revokeAll(UUID userId) {
         Instant now = Instant.now();
+        lockUser(userId);
         List<RefreshToken> tokens = repo.findByUserId(userId);
         for (RefreshToken t : tokens) {
             if (t.getRevokedAt() == null) t.setRevokedAt(now);
@@ -106,9 +111,10 @@ public class RefreshTokenService {
 
     @Transactional
     public void revokeByRefreshToken(String refreshTokenPlain) {
-        Instant now = Instant.now();
         String hash = hasher.hash(refreshTokenPlain);
 
+        lockOwner(hash);
+        Instant now = Instant.now();
         RefreshToken current = repo.findByTokenHash(hash).orElseThrow(() ->
                 new IllegalArgumentException("Invalid refresh token.")
         );
@@ -148,11 +154,31 @@ public class RefreshTokenService {
         return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
     }
 
+    @Transactional
     public UUID getUserIdFromRefresh(String refreshTokenPlain) {
         String hash = hasher.hash(refreshTokenPlain);
-        return repo.findByTokenHash(hash)
-                .map(RefreshToken::getUserId)
-                .orElseThrow(() -> new IllegalArgumentException("Invalid refresh token."));
+        lockOwner(hash);
+        RefreshToken token = repo.findByTokenHash(hash)
+                .orElseThrow(() -> new InvalidRefreshTokenException("Invalid refresh token."));
+        if (token.getRevokedAt() != null || token.getReplacedBy() != null
+                || token.getExpiresAt() == null || !token.getExpiresAt().isAfter(Instant.now())) {
+            throw new InvalidRefreshTokenException("Invalid refresh token.");
+        }
+        return token.getUserId();
     }
 
+    // Serialize session mutations per user, including rotations across different devices.
+    private void lockOwner(String hash) {
+        UUID userId = repo.findOwner(hash)
+                .orElseThrow(() -> new InvalidRefreshTokenException("Invalid refresh token."));
+        lockUser(userId);
+    }
+
+    private void lockUser(UUID userId) {
+        com.simpath.app.user.entity.User user = users.lockById(userId)
+                .orElseThrow(() -> new InvalidRefreshTokenException("Invalid refresh token."));
+        if (!user.isEnabled()) {
+            throw new InvalidRefreshTokenException("User is disabled.");
+        }
+    }
 }
