@@ -37,7 +37,8 @@ import static org.assertj.core.api.Assertions.*;
     "app.jwt.secret=test-only-key-with-at-least-thirty-two-characters",
     "spring.datasource.username=test", "spring.datasource.password=test",
     "app.refresh-token.pepper=test-only-pepper",
-    "app.token-cleanup.enabled=false", "app.rate-limit.account-limit=3",
+    "app.token-cleanup.enabled=true", "app.token-cleanup.cron=-",
+    "app.token-cleanup.batch-size=1", "app.rate-limit.account-limit=3",
     "app.rate-limit.login-limit=3", "app.rate-limit.refresh-limit=2",
     "spring.jpa.show-sql=false"
 })
@@ -63,6 +64,7 @@ class AuthIntegrationTest {
     }
 
     @Autowired MockMvc mvc;
+    @Autowired com.simpath.app.token.refresh.service.TokenCleanupService cleanup;
     @Autowired org.springframework.data.redis.core.StringRedisTemplate redis;
     @Autowired Flyway flyway;
     @Autowired JdbcTemplate jdbc;
@@ -240,8 +242,6 @@ class AuthIntegrationTest {
             token.setExpiresAt(Instant.now().minus(i < 2 ? 60 : 5, java.time.temporal.ChronoUnit.DAYS));
             tokens.saveAndFlush(token);
         }
-        com.simpath.app.token.refresh.service.TokenCleanupService cleanup =
-                new com.simpath.app.token.refresh.service.TokenCleanupService(tokens, true, 30, 1);
         cleanup.cleanup();
         assertThat(tokens.findByUserId(userId)).hasSize(2);
         cleanup.cleanup();
