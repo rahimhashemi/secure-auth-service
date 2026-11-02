@@ -12,9 +12,11 @@ import java.io.IOException;
 // Created inside the security chain, not a servlet bean: executes once before authentication.
 public class RateLimitFilter extends OncePerRequestFilter {
     private final RateLimitService limits;
+    private final ClientAddressResolver addresses;
 
-    public RateLimitFilter(RateLimitService limits) {
+    public RateLimitFilter(RateLimitService limits, ClientAddressResolver addresses) {
         this.limits = limits;
+        this.addresses = addresses;
     }
 
     @Override
@@ -22,6 +24,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
                                     FilterChain chain) throws ServletException, IOException {
         String path = request.getRequestURI().substring(request.getContextPath().length());
         String operation = switch (path) {
+            case "/auth/register", "/auth/register/" -> "register";
             case "/auth/login", "/auth/login/" -> "login";
             case "/auth/refresh", "/auth/refresh/" -> "refresh";
             default -> null;
@@ -33,7 +36,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
         long retryAfter;
         try {
             // Do not trust client-supplied X-Forwarded-For or Forwarded headers.
-            retryAfter = limits.check(operation, request.getRemoteAddr());
+            retryAfter = limits.check(operation, addresses.resolve(request));
         } catch (DataAccessException ex) {
             reject(response, 503, "RATE_LIMIT_UNAVAILABLE", "Authentication temporarily unavailable.", 1);
             return;
@@ -55,3 +58,4 @@ public class RateLimitFilter extends OncePerRequestFilter {
         response.getWriter().write("{\"code\":\"" + code + "\",\"message\":\"" + message + "\"}");
     }
 }
+

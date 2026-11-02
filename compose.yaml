@@ -5,7 +5,7 @@ services:
     environment:
       POSTGRES_DB: authdb
       POSTGRES_USER: auth
-      POSTGRES_PASSWORD: authpass
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
     ports:
       - "127.0.0.1:5432:5432"
     healthcheck:
@@ -29,8 +29,13 @@ services:
     environment:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/authdb
       SPRING_DATASOURCE_USERNAME: auth
-      SPRING_DATASOURCE_PASSWORD: authpass
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
       SPRING_DATA_REDIS_HOST: redis
+      APP_TRUSTED_PROXIES: ${APP_TRUSTED_PROXIES:-}
+      APP_API_DOCS_ENABLED: ${APP_API_DOCS_ENABLED:-false}
+      APP_RATE_LIMIT_REGISTER_LIMIT: ${APP_RATE_LIMIT_REGISTER_LIMIT:-5}
+      APP_RATE_LIMIT_ACCOUNT_LIMIT: ${APP_RATE_LIMIT_ACCOUNT_LIMIT:-10}
+      APP_RATE_LIMIT_ACCOUNT_WINDOW_SECONDS: ${APP_RATE_LIMIT_ACCOUNT_WINDOW_SECONDS:-300}
       APP_RATE_LIMIT_ENABLED: ${APP_RATE_LIMIT_ENABLED:-true}
       APP_RATE_LIMIT_LOGIN_LIMIT: ${APP_RATE_LIMIT_LOGIN_LIMIT:-10}
       APP_RATE_LIMIT_REFRESH_LIMIT: ${APP_RATE_LIMIT_REFRESH_LIMIT:-30}
@@ -39,11 +44,12 @@ services:
       APP_REFRESH_PEPPER: ${APP_REFRESH_PEPPER:?Set APP_REFRESH_PEPPER}
 
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
+
 
 

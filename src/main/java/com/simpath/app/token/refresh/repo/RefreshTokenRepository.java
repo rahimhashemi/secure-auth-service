@@ -20,5 +20,14 @@ public interface RefreshTokenRepository extends JpaRepository<RefreshToken, UUID
 
     List<RefreshToken> findByUserId(UUID userId);
 
-    long deleteByExpiresAtBefore(Instant now);
+    @org.springframework.data.jpa.repository.Modifying
+    @org.springframework.data.jpa.repository.Query(value = """
+            DELETE FROM refresh_tokens WHERE id IN (
+                SELECT id FROM refresh_tokens WHERE expires_at < :cutoff
+                ORDER BY expires_at LIMIT :batchSize
+            )
+            """, nativeQuery = true)
+    int deleteExpiredBatch(@org.springframework.data.repository.query.Param("cutoff") Instant cutoff,
+                           @org.springframework.data.repository.query.Param("batchSize") int batchSize);
 }
+

@@ -11,7 +11,7 @@ import static org.mockito.Mockito.*;
 
 class RateLimitFilterTest {
     private final RateLimitService service = mock(RateLimitService.class);
-    private final RateLimitFilter filter = new RateLimitFilter(service);
+    private final RateLimitFilter filter = new RateLimitFilter(service, new ClientAddressResolver(""));
 
     @Test void rejectedLoginReturns429AndRetryAfterWithoutCallingEndpoint() throws Exception {
         MockHttpServletRequest request = new MockHttpServletRequest("POST", "/auth/login");
@@ -69,3 +69,4 @@ class RateLimitFilterTest {
                 new MockHttpServletResponse(), chain)).isInstanceOf(ServletException.class);
     }
 }
+

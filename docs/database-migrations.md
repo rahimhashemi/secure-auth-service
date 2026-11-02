@@ -4,7 +4,7 @@
 
 Flyway owns DDL. Hibernate uses `ddl-auto: validate` and does not create or update
 application tables. On an empty PostgreSQL schema, startup applies
-`V1__create_auth_tables.sql`, then Hibernate checks the mapped column types.
+`V1__create_auth_tables.sql`, and V2 adds the unique token-hash and expiry indexes; then Hibernate checks the mapped column types.
 Flyway records versions and checksums in `flyway_schema_history`. A subsequent
 startup validates migration history and only applies new versions.
 
@@ -70,3 +70,6 @@ A further application test verifies V1 history after successful JPA startup.
 
 Flyway is a forward migration tool here. Transactional PostgreSQL DDL protects a
 failed migration where supported; it is not an application/data rollback plan.
+
+
+V2 requires unique token hashes. Check and explicitly reconcile duplicates before upgrade; see [hardening notes](security-hardening.md). A verified V1 baseline is still version 1 so V2 runs afterward.

@@ -14,9 +14,11 @@ import org.springframework.web.bind.annotation.RestController;
 public class AuthController {
 
     private final AuthService auth;
+    private final com.simpath.app.security.ClientAddressResolver addresses;
 
-    public AuthController(AuthService auth) {
+    public AuthController(AuthService auth, com.simpath.app.security.ClientAddressResolver addresses) {
         this.auth = auth;
+        this.addresses = addresses;
     }
 
     @PostMapping("/register")
@@ -26,22 +28,22 @@ public class AuthController {
 
     @PostMapping("/login")
     public AuthResponse login(@Valid @RequestBody LoginRequest req, HttpServletRequest http) {
-        return auth.login(req, http.getHeader("User-Agent"), http.getRemoteAddr());
+        return auth.login(req, http.getHeader("User-Agent"), addresses.resolve(http));
     }
 
     @PostMapping("/refresh")
     public AuthResponse refresh(@Valid @RequestBody RefreshRequest req, HttpServletRequest http) {
-        return auth.refresh(req, http.getHeader("User-Agent"), http.getRemoteAddr());
+        return auth.refresh(req, http.getHeader("User-Agent"), addresses.resolve(http));
     }
 
     @PostMapping("/logout")
     public void logout(@Valid @RequestBody LogoutRequest req, HttpServletRequest http) {
-        auth.logout(req, http.getHeader("User-Agent"), http.getRemoteAddr());
+        auth.logout(req, http.getHeader("User-Agent"), addresses.resolve(http));
     }
 
     @PostMapping("/logout-all")
     public void logoutAll(@Valid @RequestBody LogoutRequest req, HttpServletRequest http) {
-        auth.logoutAll(req, http.getHeader("User-Agent"), http.getRemoteAddr());
+        auth.logoutAll(req, http.getHeader("User-Agent"), addresses.resolve(http));
     }
 
 }

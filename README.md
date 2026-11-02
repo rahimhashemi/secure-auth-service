@@ -23,6 +23,7 @@ Requires Docker Engine / Docker Desktop and Docker Compose v2. Generate local se
 and keep them outside source control:
 
 ```bash
+export POSTGRES_PASSWORD="$(openssl rand -hex 24)"
 export APP_JWT_SECRET="$(openssl rand -hex 32)"
 export APP_REFRESH_PEPPER="$(openssl rand -hex 32)"
 docker compose up --build
@@ -33,12 +34,12 @@ PostgreSQL and Redis ports are bound to localhost. Redis is required for login
 and refresh rate limiting and Compose waits for its health check.
 
 - API: http://localhost:8080
-- Swagger: http://localhost:8080/swagger-ui.html
+- Swagger (opt-in with `APP_API_DOCS_ENABLED=true`): http://localhost:8080/swagger-ui.html
 - Health: http://localhost:8080/actuator/health
 
 JWT secret and refresh pepper are required configuration. The JWT secret must have
-at least 32 UTF-8 bytes. The development database credentials in Compose are local
-examples. Changing the pepper invalidates existing refresh tokens; changing the JWT
+at least 32 UTF-8 bytes. Database credentials must be configured explicitly; Compose requires
+`POSTGRES_PASSWORD`. Changing the pepper invalidates existing refresh tokens; changing the JWT
 key invalidates existing access tokens. Key rotation is not implemented.
 
 ## API examples
@@ -46,11 +47,11 @@ key invalidates existing access tokens. Key rotation is not implemented.
 ```bash
 curl -X POST localhost:8080/auth/register \
   -H 'Content-Type: application/json' \
-  -d '{"email":"test@example.com","password":"Passw0rd!"}'
+  -d '{"email":"test@example.com","password":"Correct-Horse-123!"}'
 
 curl -X POST localhost:8080/auth/login \
   -H 'Content-Type: application/json' \
-  -d '{"email":"test@example.com","password":"Passw0rd!"}'
+  -d '{"email":"test@example.com","password":"Correct-Horse-123!"}'
 
 curl localhost:8080/me -H 'Authorization: Bearer <ACCESS_TOKEN>'
 
@@ -87,7 +88,7 @@ operation and can remain if the surrounding transaction subsequently fails.
 By default each socket peer IP gets separate budgets of **10 login attempts** and
 **30 refresh attempts** in a **60-second fixed window**, starting at the first request.
 All POST attempts count, including successful, invalid, and malformed requests.
-Other endpoints are not covered. Redis executes the check, increment, and expiry
+Registration has a separate default limit of 5 requests per IP/window. Other endpoints are not covered. Redis executes the check, increment, and expiry
 atomically so multiple application instances share the same budget. Redis keys use
 SHA-256 of the address and never include passwords, email addresses, or tokens.
 An address hash is pseudonymous, not anonymous.
@@ -111,11 +112,11 @@ Limits must be positive and window size must be 1..86400 seconds. Disabling the
 limiter explicitly bypasses Redis checks. All instances must use the same Redis
 database and settings. Redis restarts, eviction, or data loss can reset budgets.
 
-Forwarded headers are disabled and client-supplied `X-Forwarded-For` / `Forwarded`
-are ignored. Behind a reverse proxy, requests share the proxy address budget until
+Automatic forwarded-header processing is disabled. `X-Forwarded-For` is ignored unless
+the peer is explicitly listed in `APP_TRUSTED_PROXIES` and supplies one literal client IP. Behind a reverse proxy, requests share the proxy address budget until
 trusted-ingress address handling is deliberately configured. Clients sharing a NAT
-also share a budget. IP rotation/distributed attacks can bypass IP-only limits;
-per-account controls and edge protection remain future work. No account lockout is
+also share a budget. IP rotation/distributed attacks can bypass IP-only limits; an additional normalized-account
+login budget now limits attempts across IPs. Edge protection remains necessary. No account lockout is
 implemented. Do not enable arbitrary forwarded-header trust on an internet-facing app.
 
 ## Database migrations
@@ -140,6 +141,9 @@ bash mvnw -B verify
 bash mvnw -B -Dtest=JwtAuthFilterTest,RateLimitFilterTest test
 ```
 
+See [authentication hardening](docs/security-hardening.md) for account throttling, trusted
+proxy configuration, generic registration responses, password policy, cleanup and deployment defaults.
+
 The PostgreSQL integration suite covers expired refresh rejection, rotation and
 persisted reuse revocation, concurrent refresh attempts, disabled users, failed-login
 audit persistence, and rejection of stale tokens for logout-all. Filter tests check
@@ -157,11 +161,12 @@ suite runs with Flyway and production Hibernate validation, without `create-drop
 
 ## Remaining limitations
 
-- No per-account throttling, registration throttling, MFA, email verification, password reset, or OAuth2/OIDC support.
+- No MFA, email verification, password reset, or OAuth2/OIDC support.
 - Existing Hibernate databases require verified, manual Flyway adoption; separate migration/runtime DB roles are not configured.
-- No immediate access-token revocation or automatic expired-token cleanup.
+- No immediate access-token revocation. Expired refresh history is cleaned in bounded batches after a retention period.
 - Database locks serialize session operations per user, with no custom lock timeout policy.
 - Registration normalization/concurrency behavior and broader HTTP endpoint coverage need work.
 - Deployment hardening, TLS, browser credential storage and CSRF policy require a deployment-specific review.
+
 
 

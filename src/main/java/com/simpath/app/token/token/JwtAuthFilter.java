@@ -2,7 +2,6 @@ package com.simpath.app.token.token;
 
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
-import io.jsonwebtoken.security.Keys;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -15,7 +14,6 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import javax.crypto.SecretKey;
-import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 @Component
@@ -25,11 +23,18 @@ public class JwtAuthFilter extends OncePerRequestFilter {
     private final String issuer;
 
     public JwtAuthFilter(
-            @Value("${app.jwt.secret}") String secret,
+            SecretKey key,
             @Value("${app.jwt.issuer}") String issuer
     ) {
-        this.key = Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
+        this.key = key;
         this.issuer = issuer;
+    }
+
+    @Override
+    protected boolean shouldNotFilter(HttpServletRequest request) {
+        String path = request.getRequestURI().substring(request.getContextPath().length());
+        return "POST".equals(request.getMethod()) && ("/auth/login".equals(path)
+                || "/auth/register".equals(path) || "/auth/refresh".equals(path));
     }
 
     @Override
@@ -73,4 +78,5 @@ public class JwtAuthFilter extends OncePerRequestFilter {
         filterChain.doFilter(request, response);
     }
 }
+
 
