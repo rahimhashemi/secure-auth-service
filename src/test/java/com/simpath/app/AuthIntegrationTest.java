@@ -39,7 +39,7 @@ import static org.assertj.core.api.Assertions.*;
     "app.refresh-token.pepper=test-only-pepper",
         "app.rate-limit.account-key=test-only-account-key",
     "app.token-cleanup.enabled=true", "app.token-cleanup.cron=-",
-    "app.token-cleanup.batch-size=1", "app.rate-limit.account-limit=3",
+    "app.token-cleanup.batch-size=1", "app.token-cleanup.max-batches=2", "app.rate-limit.account-limit=3",
     "app.rate-limit.login-limit=3", "app.rate-limit.refresh-limit=2",
     "spring.jpa.show-sql=false"
 })
@@ -92,13 +92,14 @@ class AuthIntegrationTest {
             .isInstanceOf(InvalidRefreshTokenException.class);
         assertThat(tokens.findByUserId(userId)).hasSize(1);
     }
-    @Test void reuseRevokesAllSessionsAndPersistsAuditAfterException() {
-        AuthResponse session = login(); login();
+    @Test void reuseRevokesOnlyItsFamilyAndPersistsAuditAfterException() {
+        AuthResponse session = login(); AuthResponse otherDevice = login();
         AuthResponse next = auth.refresh(new RefreshRequest(session.refreshToken()), "test", "ip");
         assertThat(next.refreshToken()).isNotEqualTo(session.refreshToken());
         assertThatThrownBy(() -> auth.refresh(new RefreshRequest(session.refreshToken()), "test", "ip"))
             .isInstanceOf(InvalidRefreshTokenException.class);
-        assertThat(tokens.findByUserId(userId)).allMatch(t -> t.getRevokedAt() != null);
+        assertThat(tokens.findByUserId(userId).stream().filter(t -> t.getRevokedAt() != null)).hasSize(2);
+        assertThat(refresh.getUserIdFromRefresh(otherDevice.refreshToken())).isEqualTo(userId);
         assertThat(audit.findAll()).anyMatch(e -> "REFRESH_REUSE".equals(e.getType())
                 && userId.equals(e.getUserId()) && e.getDetail().contains("reason=REUSE;familyId="));
         assertThatThrownBy(() -> auth.refresh(new RefreshRequest(next.refreshToken()), "test", "ip"))
@@ -237,17 +238,17 @@ class AuthIntegrationTest {
                 .isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
     }
     @Test void cleanupIsBoundedAndRetainsRecentHistory() {
-        for (int i = 0; i < 3; i++) {
+        for (int i = 0; i < 5; i++) {
             RefreshToken token = new RefreshToken();
             token.setUserId(userId); token.setFamilyId(java.util.UUID.randomUUID());
             token.setTokenHash("cleanup-" + i);
-            token.setExpiresAt(Instant.now().minus(i < 2 ? 60 : 5, java.time.temporal.ChronoUnit.DAYS));
+            token.setExpiresAt(Instant.now().minus(i < 4 ? 60 : 5, java.time.temporal.ChronoUnit.DAYS));
             tokens.saveAndFlush(token);
         }
         cleanup.cleanup();
-        assertThat(tokens.findByUserId(userId)).hasSize(2);
+        assertThat(tokens.findByUserId(userId)).hasSize(3);
         cleanup.cleanup();
-        assertThat(tokens.findByUserId(userId)).hasSize(1).allMatch(t -> "cleanup-2".equals(t.getTokenHash()));
+        assertThat(tokens.findByUserId(userId)).hasSize(1).allMatch(t -> "cleanup-4".equals(t.getTokenHash()));
     }
 
     @Test void apiDocumentationRemainsDisabledByDefault() throws Exception {
@@ -259,6 +260,34 @@ class AuthIntegrationTest {
         AuthResponse response = auth.login(new LoginRequest("RAHIM@example.com", "Correct-Horse-123!"), "test", "ip");
         assertThat(response.accessToken()).isNotBlank();
     }
+    @Test void expiredRotatedTokenCannotRevokeAnyLiveFamily() {
+        AuthResponse old = login();
+        AuthResponse successor = auth.refresh(new RefreshRequest(old.refreshToken()), "test", "ip");
+        AuthResponse other = login();
+        RefreshToken history = tokens.findByUserId(userId).stream()
+                .filter(token -> token.getReplacedBy() != null).findFirst().orElseThrow();
+        history.setExpiresAt(Instant.now().minusSeconds(1));
+        tokens.saveAndFlush(history);
+        assertThatThrownBy(() -> auth.refresh(new RefreshRequest(old.refreshToken()), "test", "ip"))
+                .isInstanceOfSatisfying(InvalidRefreshTokenException.class,
+                        error -> assertThat(error.getReason()).isEqualTo(InvalidRefreshTokenException.Reason.EXPIRED));
+        assertThat(refresh.getUserIdFromRefresh(successor.refreshToken())).isEqualTo(userId);
+        assertThat(refresh.getUserIdFromRefresh(other.refreshToken())).isEqualTo(userId);
+        assertThat(audit.findAll()).noneMatch(event -> "REFRESH_REUSE".equals(event.getType()));
+    }
+
+    @Test void successfulLoginsDoNotConsumeOrResetFailureBudget() {
+        for (int i = 0; i < 4; i++) assertThat(login().refreshToken()).isNotBlank();
+        for (int i = 0; i < 2; i++) {
+            assertThatThrownBy(() -> auth.login(new LoginRequest("rahim@example.com", "wrong"), "test", "ip"))
+                    .isInstanceOf(com.simpath.app.common.InvalidCredentialsException.class);
+        }
+        assertThat(login().refreshToken()).isNotBlank();
+        assertThatThrownBy(() -> auth.login(new LoginRequest("rahim@example.com", "wrong"), "test", "ip"))
+                .isInstanceOf(com.simpath.app.common.InvalidCredentialsException.class);
+        assertThatThrownBy(this::login).isInstanceOf(com.simpath.app.common.RateLimitExceededException.class);
+    }
+
 }
 
 

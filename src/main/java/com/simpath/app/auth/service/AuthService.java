@@ -46,6 +46,7 @@ public class AuthService {
 
         boolean passwordMatches = passwordService.matches(req.password(), u == null ? null : u.getPasswordHash());
         if (u == null || !u.isEnabled() || !passwordMatches) {
+            rateLimits.recordFailedLogin(email);
             audit.log("LOGIN_FAIL", u != null ? u.getId() : null, "invalid_credentials", ip, userAgent);
             throw new com.simpath.app.common.InvalidCredentialsException();
         }

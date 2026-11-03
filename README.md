@@ -8,7 +8,7 @@ This is a portfolio project, not a production-ready identity provider.
 - BCrypt password hashing and signed, short-lived JWT access tokens.
 - Random 384-bit opaque refresh tokens; only peppered hashes are stored.
 - Refresh token expiration checks and rotation within a session family.
-- Reuse detection that revokes all refresh sessions for the user.
+- Reuse detection that revokes the affected refresh session family.
 - Database user-row locks serialize session mutations across application instances.
 - Disabled users cannot obtain new tokens through refresh.
 - Logout of a refresh token and logout of all refresh sessions using an active refresh token.
@@ -77,8 +77,9 @@ unexpired refresh token.
 Access tokens expire after 15 minutes by default. Refresh tokens expire 14 days
 after issuance; rotation renews that lifetime. There is no absolute session lifetime.
 
-A reused refresh token revokes **all refresh sessions** for its user. This change
-commits even though the request returns 401. Clients must serialize refresh requests:
+A reused, unexpired refresh token revokes **its session family**. Other devices remain
+active. Expired history is rejected without revocation. Family revocation commits even
+though the request returns 401. Clients must serialize refresh requests:
 two concurrent requests using the same token cause one rotation and then reuse
 revocation, so the returned successor is also revoked.
 
@@ -121,7 +122,7 @@ Automatic forwarded-header processing is disabled. `X-Forwarded-For` is ignored 
 the peer is explicitly listed in `APP_TRUSTED_PROXIES` and supplies one literal client IP. Behind a reverse proxy, requests share the proxy address budget until
 trusted-ingress address handling is deliberately configured. Clients sharing a NAT
 also share a budget. IP rotation/distributed attacks can bypass IP-only limits; an additional normalized-account
-login budget now limits attempts across IPs. Edge protection remains necessary. No account lockout is
+login budget now limits failed attempts across IPs; successful logins do not consume or reset it. Edge protection remains necessary. No account lockout is
 implemented. Do not enable arbitrary forwarded-header trust on an internet-facing app.
 
 ## Database migrations

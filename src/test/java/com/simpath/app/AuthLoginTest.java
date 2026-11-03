@@ -28,6 +28,7 @@ class AuthLoginTest {
                 .isInstanceOf(InvalidCredentialsException.class);
         verify(passwords).matches("wrong", null);
         verify(limits).enforceLoginAccount("absent@example.com");
+        verify(limits).recordFailedLogin("absent@example.com");
     }
     @Test void disabledUserStillPerformsPasswordComparison() {
         User user = new User(); user.setEnabled(false); user.setPasswordHash("stored");
@@ -35,6 +36,7 @@ class AuthLoginTest {
         assertThatThrownBy(() -> auth.login(new LoginRequest("disabled@example.com", "wrong"), "test", "ip"))
                 .isInstanceOf(InvalidCredentialsException.class);
         verify(passwords).matches("wrong", "stored");
+        verify(limits).recordFailedLogin("disabled@example.com");
     }
     @Test void duplicateRegistrationStillHashesAndUsesAtomicInsert() {
         when(passwords.hash("correct horse battery staple")).thenReturn("hash");
