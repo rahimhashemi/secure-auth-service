@@ -15,6 +15,7 @@ This is a portfolio project, not a production-ready identity provider.
 - Audit events in independent transactions, including failed login and refresh reuse.
 - Swagger UI and a protected `/me` endpoint.
 - Shared Redis rate limits for login and refresh, with HTTP 429 and Retry-After.
+- Versioned PostgreSQL migrations with Flyway and Hibernate schema validation.
 
 ## Run locally
 
@@ -117,6 +118,18 @@ also share a budget. IP rotation/distributed attacks can bypass IP-only limits;
 per-account controls and edge protection remain future work. No account lockout is
 implemented. Do not enable arbitrary forwarded-header trust on an internet-facing app.
 
+## Database migrations
+
+On an empty database, Flyway creates the three auth tables from the versioned SQL
+under `src/main/resources/db/migration`; Hibernate then validates the schema instead
+of changing it. Applied migration checksums are checked on startup. Automatic baseline
+and Flyway clean are disabled.
+
+**Existing databases created by Hibernate need a deliberate adoption step.** Startup
+will refuse an unmanaged nonempty schema. Follow [the migration guide](docs/database-migrations.md)
+to compare the schema, preserve data and explicitly baseline a verified version 1.
+A baseline records history; it does not repair schema differences.
+
 ## Tests
 
 ```bash
@@ -138,12 +151,17 @@ buckets, 40 concurrent attempts through two independent Redis clients, HTTP filt
 wiring, malformed request counting, forwarded-header spoofing, 429 headers, and
 fail-closed behavior when Redis is unavailable.
 
+Migration tests also check empty schema initialization, data retention on repeat
+migration, refusal of unmanaged schemas and checksum mismatch rejection. The auth
+suite runs with Flyway and production Hibernate validation, without `create-drop`.
+
 ## Remaining limitations
 
 - No per-account throttling, registration throttling, MFA, email verification, password reset, or OAuth2/OIDC support.
-- Hibernate `ddl-auto: update` is used for development; versioned migrations are needed.
+- Existing Hibernate databases require verified, manual Flyway adoption; separate migration/runtime DB roles are not configured.
 - No immediate access-token revocation or automatic expired-token cleanup.
 - Database locks serialize session operations per user, with no custom lock timeout policy.
 - Registration normalization/concurrency behavior and broader HTTP endpoint coverage need work.
 - Deployment hardening, TLS, browser credential storage and CSRF policy require a deployment-specific review.
+
 
