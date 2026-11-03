@@ -26,6 +26,7 @@ import static org.assertj.core.api.Assertions.*;
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
         "app.jwt.secret=test-only-key-with-at-least-thirty-two-characters",
         "app.refresh-token.pepper=test-only-pepper",
+        "app.rate-limit.account-key=test-only-account-key",
         "spring.datasource.username=test", "spring.datasource.password=test",
         "app.rate-limit.login-limit=3", "app.rate-limit.register-limit=3", "app.rate-limit.refresh-limit=3",
         "app.token-cleanup.cron=-", "spring.jpa.show-sql=false",
@@ -115,7 +116,10 @@ class PlatformHttpIntegrationTest {
             // Prove the encoded request reached MVC validation, rather than being rejected by the firewall.
             assertThat(json.readTree(response.body()).path("code").asText()).isEqualTo("VALIDATION_ERROR");
         }
-        assertThat(post(canonical, Map.of()).statusCode()).isEqualTo(429);
+        HttpResponse<String> limited = post(canonical, Map.of());
+        assertThat(limited.statusCode()).isEqualTo(429);
+        assertThat(json.readTree(limited.body()).path("code").asText()).isEqualTo("RATE_LIMIT_EXCEEDED");
+        assertThat(Instant.parse(json.readTree(limited.body()).path("timestamp").asText())).isNotNull();
     }
     @Test void encodedRegisterSharesIpBudget() throws Exception {
         assertEncodedRouteSharesBudget("/auth/register", "/auth/regi%73ter");
@@ -140,6 +144,7 @@ class PlatformHttpIntegrationTest {
     @Test void wrongMethodPreserves405AndAllowHeader() throws Exception {
         HttpResponse<String> response = get("/auth/login");
         assertThat(response.statusCode()).isEqualTo(405);
+        assertThat(json.readTree(response.body()).path("code").asText()).isEqualTo("METHOD_NOT_ALLOWED");
         assertThat(response.headers().firstValue("Allow").orElse("")).contains("POST");
     }
     @Test void unsupportedMediaTypePreserves415() throws Exception {
@@ -147,6 +152,18 @@ class PlatformHttpIntegrationTest {
                 .timeout(Duration.ofSeconds(10)).header("Content-Type", "text/plain")
                 .POST(HttpRequest.BodyPublishers.ofString("not-json")).build(), HttpResponse.BodyHandlers.ofString());
         assertThat(response.statusCode()).isEqualTo(415);
+        assertThat(json.readTree(response.body()).path("code").asText()).isEqualTo("UNSUPPORTED_MEDIA_TYPE");
+    }
+
+    @Test void invalidJwtUsesTheSharedApiErrorContract() throws Exception {
+        HttpResponse<String> response = client.send(HttpRequest.newBuilder(url("/me"))
+                .timeout(Duration.ofSeconds(10)).header("Authorization", "Bearer invalid").GET().build(),
+                HttpResponse.BodyHandlers.ofString());
+        assertThat(response.statusCode()).isEqualTo(401);
+        JsonNode error = json.readTree(response.body());
+        assertThat(error.path("code").asText()).isEqualTo("INVALID_TOKEN");
+        assertThat(error.path("path").asText()).isEqualTo("/me");
+        assertThat(Instant.parse(error.path("timestamp").asText())).isNotNull();
     }
 }
 

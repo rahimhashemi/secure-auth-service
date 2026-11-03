@@ -48,7 +48,7 @@ public class RateLimitService {
                             @Value("${app.rate-limit.register-limit:5}") int registerLimit,
                             @Value("${app.rate-limit.account-limit:10}") int accountLimit,
                             @Value("${app.rate-limit.account-window-seconds:300}") long accountWindowSeconds,
-                            @Value("${app.refresh-token.pepper}") String accountKeySecret) {
+                            @Value("${app.rate-limit.account-key}") String accountKeySecret) {
         if (loginLimit < 1 || refreshLimit < 1 || registerLimit < 1 || accountLimit < 1
                 || windowSeconds < 1 || windowSeconds > 86400
                 || accountWindowSeconds < 1 || accountWindowSeconds > 86400
@@ -112,4 +112,5 @@ public class RateLimitService {
         }
     }
 }
+
 

@@ -9,7 +9,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 @RestControllerAdvice
-public class GlobalExceptionHandler {
+public class GlobalExceptionHandler extends org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExceptionHandler {
     private static final org.slf4j.Logger LOG = org.slf4j.LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
     @ExceptionHandler(InvalidCredentialsException.class)
@@ -30,22 +30,10 @@ public class GlobalExceptionHandler {
                 .body(ApiError.of("RATE_LIMIT_UNAVAILABLE", "Authentication temporarily unavailable.", req.getRequestURI()));
     }
 
-    @ExceptionHandler(org.springframework.http.converter.HttpMessageNotReadableException.class)
-    public ResponseEntity<ApiError> malformed(Exception ex, HttpServletRequest req) {
-        return ResponseEntity.badRequest().body(ApiError.of("BAD_REQUEST", "Invalid request body.", req.getRequestURI()));
-    }
-
-
     @ExceptionHandler(InvalidRefreshTokenException.class)
     public ResponseEntity<ApiError> invalidRefresh(InvalidRefreshTokenException ex, HttpServletRequest req) {
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                 .body(ApiError.of("INVALID_REFRESH_TOKEN", "Invalid refresh token.", req.getRequestURI()));
-    }
-
-    @ExceptionHandler(MethodArgumentNotValidException.class)
-    public ResponseEntity<ApiError> validation(MethodArgumentNotValidException ex, HttpServletRequest req) {
-        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                .body(ApiError.of("VALIDATION_ERROR", "Request validation failed.", req.getRequestURI()));
     }
 
     @ExceptionHandler(ConstraintViolationException.class)
@@ -54,10 +42,23 @@ public class GlobalExceptionHandler {
                 .body(ApiError.of("VALIDATION_ERROR", "Constraint violation.", req.getRequestURI()));
     }
 
-    @ExceptionHandler(org.springframework.web.servlet.resource.NoResourceFoundException.class)
-    public ResponseEntity<ApiError> notFound(Exception ex, HttpServletRequest req) {
-        return ResponseEntity.status(HttpStatus.NOT_FOUND)
-                .body(ApiError.of("NOT_FOUND", "Resource not found.", req.getRequestURI()));
+    @Override
+    protected ResponseEntity<Object> handleExceptionInternal(Exception ex, Object body,
+            org.springframework.http.HttpHeaders headers, org.springframework.http.HttpStatusCode status,
+            org.springframework.web.context.request.WebRequest request) {
+        String path = request instanceof org.springframework.web.context.request.ServletWebRequest servlet
+                ? servlet.getRequest().getRequestURI() : "";
+        String code = switch (status.value()) {
+            case 400 -> ex instanceof MethodArgumentNotValidException ? "VALIDATION_ERROR" : "BAD_REQUEST";
+            case 404 -> "NOT_FOUND";
+            case 405 -> "METHOD_NOT_ALLOWED";
+            case 406 -> "NOT_ACCEPTABLE";
+            case 415 -> "UNSUPPORTED_MEDIA_TYPE";
+            default -> status.is4xxClientError() ? "REQUEST_ERROR" : "INTERNAL_ERROR";
+        };
+        String message = status.is5xxServerError() ? "Unexpected error." : "Request cannot be processed.";
+        // Delegate committed-response handling and preserve Allow/Accept and other framework headers.
+        return super.handleExceptionInternal(ex, ApiError.of(code, message, path), headers, status, request);
     }
 
     @ExceptionHandler(Exception.class)
@@ -69,5 +70,6 @@ public class GlobalExceptionHandler {
                 .body(ApiError.of("INTERNAL_ERROR", "Unexpected error.", req.getRequestURI()));
     }
 }
+
 
 

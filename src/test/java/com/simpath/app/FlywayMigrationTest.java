@@ -36,7 +36,7 @@ class FlywayMigrationTest {
     }
 
     @Test void emptyDatabaseGetsAllTablesAndIndexes() throws Exception {
-        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(2);
+        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(3);
         try (Connection connection = connect(); Statement sql = connection.createStatement()) {
             try (ResultSet result = sql.executeQuery("select count(*) from information_schema.tables where table_schema = current_schema() and table_name in ('users','refresh_tokens','audit_events')")) {
                 assertThat(result.next()).isTrue();
@@ -96,7 +96,7 @@ class FlywayMigrationTest {
             sql.executeUpdate("insert into refresh_tokens(id,user_id,token_hash,family_id) values ('" + UUID.randomUUID()
                     + "','" + UUID.randomUUID() + "','preserved-token','" + UUID.randomUUID() + "')");
         }
-        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(1);
+        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(2);
         try (Connection connection = connect(); Statement sql = connection.createStatement();
              ResultSet result = sql.executeQuery("select count(*) from refresh_tokens where token_hash='preserved-token'")) {
             assertThat(result.next()).isTrue(); assertThat(result.getInt(1)).isEqualTo(1);
@@ -107,6 +107,23 @@ class FlywayMigrationTest {
                     .isInstanceOf(java.sql.SQLException.class);
         }
     }
+
+    @Test void canonicalEmailCutoverRejectsLegacyRowsWithoutChangingIdentities() throws Exception {
+        Flyway versionTwo = Flyway.configure().dataSource(DB.getJdbcUrl(), DB.getUsername(), DB.getPassword())
+                .locations("classpath:db/migration").schemas(schema).defaultSchema(schema).target("2").load();
+        versionTwo.migrate();
+        try (Connection connection = connect(); Statement sql = connection.createStatement()) {
+            sql.executeUpdate("insert into users(id,email,password_hash,enabled,created_at) values ('"
+                    + UUID.randomUUID() + "','LEGACY@example.com','test-hash',true,current_timestamp)");
+        }
+        assertThatThrownBy(() -> flyway.migrate()).isInstanceOf(FlywayException.class);
+        try (Connection connection = connect(); Statement sql = connection.createStatement();
+             ResultSet result = sql.executeQuery("select email from users")) {
+            assertThat(result.next()).isTrue();
+            assertThat(result.getString(1)).isEqualTo("LEGACY@example.com");
+        }
+    }
 }
+
 
 
