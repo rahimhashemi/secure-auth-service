@@ -36,7 +36,7 @@ class FlywayMigrationTest {
     }
 
     @Test void emptyDatabaseGetsAllTablesAndIndexes() throws Exception {
-        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(1);
+        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(2);
         try (Connection connection = connect(); Statement sql = connection.createStatement()) {
             try (ResultSet result = sql.executeQuery("select count(*) from information_schema.tables where table_schema = current_schema() and table_name in ('users','refresh_tokens','audit_events')")) {
                 assertThat(result.next()).isTrue();
@@ -87,4 +87,25 @@ class FlywayMigrationTest {
         assertThat(flyway.validateWithResult().validationSuccessful).isFalse();
         assertThatThrownBy(() -> flyway.migrate()).isInstanceOf(FlywayException.class);
     }
+
+    @Test void upgradeFromVersionOnePreservesTokensAndAddsUniqueHashIndex() throws Exception {
+        Flyway versionOne = Flyway.configure().dataSource(DB.getJdbcUrl(), DB.getUsername(), DB.getPassword())
+                .locations("classpath:db/migration").schemas(schema).defaultSchema(schema).target("1").load();
+        versionOne.migrate();
+        try (Connection connection = connect(); Statement sql = connection.createStatement()) {
+            sql.executeUpdate("insert into refresh_tokens(id,user_id,token_hash,family_id) values ('" + UUID.randomUUID()
+                    + "','" + UUID.randomUUID() + "','preserved-token','" + UUID.randomUUID() + "')");
+        }
+        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(1);
+        try (Connection connection = connect(); Statement sql = connection.createStatement();
+             ResultSet result = sql.executeQuery("select count(*) from refresh_tokens where token_hash='preserved-token'")) {
+            assertThat(result.next()).isTrue(); assertThat(result.getInt(1)).isEqualTo(1);
+        }
+        try (Connection connection = connect(); Statement sql = connection.createStatement()) {
+            assertThatThrownBy(() -> sql.executeUpdate("insert into refresh_tokens(id,user_id,token_hash,family_id) values ('"
+                    + UUID.randomUUID() + "','" + UUID.randomUUID() + "','preserved-token','" + UUID.randomUUID() + "')"))
+                    .isInstanceOf(java.sql.SQLException.class);
+        }
+    }
 }
+

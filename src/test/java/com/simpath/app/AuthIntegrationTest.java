@@ -35,7 +35,10 @@ import static org.assertj.core.api.Assertions.*;
 
 @SpringBootTest(properties = {
     "app.jwt.secret=test-only-key-with-at-least-thirty-two-characters",
+    "spring.datasource.username=test", "spring.datasource.password=test",
     "app.refresh-token.pepper=test-only-pepper",
+    "app.token-cleanup.enabled=true", "app.token-cleanup.cron=-",
+    "app.token-cleanup.batch-size=1", "app.rate-limit.account-limit=3",
     "app.rate-limit.login-limit=3", "app.rate-limit.refresh-limit=2",
     "spring.jpa.show-sql=false"
 })
@@ -61,6 +64,8 @@ class AuthIntegrationTest {
     }
 
     @Autowired MockMvc mvc;
+    @Autowired com.simpath.app.token.refresh.service.TokenCleanupService cleanup;
+    @Autowired org.springframework.data.redis.core.StringRedisTemplate redis;
     @Autowired Flyway flyway;
     @Autowired JdbcTemplate jdbc;
     @Autowired AuthService auth;
@@ -70,11 +75,14 @@ class AuthIntegrationTest {
     @Autowired AuditEventRepository audit;
     UUID userId;
     @BeforeEach void setup() {
+        try (org.springframework.data.redis.connection.RedisConnection connection = redis.getConnectionFactory().getConnection()) {
+            connection.serverCommands().flushDb();
+        }
         tokens.deleteAll(); audit.deleteAll(); users.deleteAll();
-        auth.register(new RegisterRequest("rahim@example.com", "Passw0rd!"));
+        auth.register(new RegisterRequest("rahim@example.com", "Correct-Horse-123!"));
         userId = users.findByEmailIgnoreCase("rahim@example.com").orElseThrow().getId();
     }
-    AuthResponse login() { return auth.login(new LoginRequest("rahim@example.com", "Passw0rd!"), "test", "127.0.0.1"); }
+    AuthResponse login() { return auth.login(new LoginRequest("rahim@example.com", "Correct-Horse-123!"), "test", "127.0.0.1"); }
     @Test void expiredRefreshIsRejectedWithoutCreatingSuccessor() {
         AuthResponse session = login();
         RefreshToken token = tokens.findByUserId(userId).get(0);
@@ -96,7 +104,7 @@ class AuthIntegrationTest {
     }
     @Test void failedLoginAuditSurvivesRollback() {
         assertThatThrownBy(() -> auth.login(new LoginRequest("rahim@example.com", "wrong"), "test", "ip"))
-            .isInstanceOf(IllegalArgumentException.class);
+            .isInstanceOf(com.simpath.app.common.InvalidCredentialsException.class);
         assertThat(audit.findAll()).anyMatch(e -> "LOGIN_FAIL".equals(e.getType()));
     }
     @Test void disabledUserCannotRefresh() {
@@ -139,7 +147,7 @@ class AuthIntegrationTest {
             mvc.perform(post("/auth/login").with(request -> { request.setRemoteAddr(ip); return request; })
                     .contentType(MediaType.APPLICATION_JSON)
                     .content("{\"email\":\"rahim@example.com\",\"password\":\"wrong\"}"))
-                    .andExpect(status().isBadRequest());
+                    .andExpect(status().isUnauthorized());
         }
         mvc.perform(post("/auth/login").with(request -> { request.setRemoteAddr(ip); return request; })
                 .contentType(MediaType.APPLICATION_JSON).content("{}"))
@@ -164,12 +172,82 @@ class AuthIntegrationTest {
     }
 
     @Test void applicationStartsAgainstFlywaySchemaWithoutHibernateCreatingTables() {
-        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("1");
+        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("2");
         assertThat(flyway.info().pending()).isEmpty();
         assertThat(jdbc.queryForObject(
                 "select count(*) from flyway_schema_history where version = '1' and success = true", Integer.class))
                 .isEqualTo(1);
     }
+
+    @Test void accountLimitAppliesAcrossDifferentAddresses() throws Exception {
+        for (int i = 1; i <= 3; i++) {
+            String ip = "192.0.2." + (100 + i);
+            mvc.perform(post("/auth/login").with(request -> { request.setRemoteAddr(ip); return request; })
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"email\":\"rahim@example.com\",\"password\":\"wrong\"}"))
+                    .andExpect(status().isUnauthorized());
+        }
+        mvc.perform(post("/auth/login").with(request -> { request.setRemoteAddr("192.0.2.110"); return request; })
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"email\":\"rahim@example.com\",\"password\":\"wrong\"}"))
+                .andExpect(status().isTooManyRequests()).andExpect(header().exists("Retry-After"));
+    }
+    @Test void registerRejectsWeakPasswordAndHidesDuplicates() throws Exception {
+        mvc.perform(post("/auth/register").contentType(MediaType.APPLICATION_JSON)
+                .content("{\"email\":\"new@example.com\",\"password\":\"a\"}"))
+                .andExpect(status().isBadRequest());
+        String body = "{\"email\":\"new@example.com\",\"password\":\"Correct-Horse-123!\"}";
+        mvc.perform(post("/auth/register").contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isOk());
+        mvc.perform(post("/auth/register").contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isOk());
+        assertThat(users.findByEmailIgnoreCase("new@example.com")).isPresent();
+    }
+    @Test void registrationIsThrottledBeforePasswordHashing() throws Exception {
+        for (int i = 0; i < 5; i++) {
+            mvc.perform(post("/auth/register").contentType(MediaType.APPLICATION_JSON).content("{}"))
+                    .andExpect(status().isBadRequest());
+        }
+        mvc.perform(post("/auth/register").contentType(MediaType.APPLICATION_JSON).content("{}"))
+                .andExpect(status().isTooManyRequests());
+    }
+    @Test void concurrentRegistrationCreatesOneUserWithoutServerError() throws Exception {
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        CountDownLatch start = new CountDownLatch(1);
+        Callable<Boolean> registration = () -> {
+            if (!start.await(10, TimeUnit.SECONDS)) throw new AssertionError("timeout");
+            auth.register(new RegisterRequest("race@example.com", "Correct-Horse-123!")); return true;
+        };
+        try {
+            Future<Boolean> first = executor.submit(registration);
+            Future<Boolean> second = executor.submit(registration);
+            start.countDown();
+            assertThat(first.get(30, TimeUnit.SECONDS)).isTrue();
+            assertThat(second.get(30, TimeUnit.SECONDS)).isTrue();
+            assertThat(jdbc.queryForObject("select count(*) from users where email='race@example.com'", Integer.class)).isEqualTo(1);
+        } finally { start.countDown(); executor.shutdownNow(); }
+    }
+    @Test void tokenHashUniquenessIsEnforcedByDatabase() {
+        login();
+        RefreshToken original = tokens.findByUserId(userId).get(0);
+        RefreshToken duplicate = new RefreshToken();
+        duplicate.setUserId(userId); duplicate.setFamilyId(java.util.UUID.randomUUID());
+        duplicate.setTokenHash(original.getTokenHash());
+        assertThatThrownBy(() -> tokens.saveAndFlush(duplicate))
+                .isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
+    }
+    @Test void cleanupIsBoundedAndRetainsRecentHistory() {
+        for (int i = 0; i < 3; i++) {
+            RefreshToken token = new RefreshToken();
+            token.setUserId(userId); token.setFamilyId(java.util.UUID.randomUUID());
+            token.setTokenHash("cleanup-" + i);
+            token.setExpiresAt(Instant.now().minus(i < 2 ? 60 : 5, java.time.temporal.ChronoUnit.DAYS));
+            tokens.saveAndFlush(token);
+        }
+        cleanup.cleanup();
+        assertThat(tokens.findByUserId(userId)).hasSize(2);
+        cleanup.cleanup();
+        assertThat(tokens.findByUserId(userId)).hasSize(1).allMatch(t -> "cleanup-2".equals(t.getTokenHash()));
+    }
 }
+
 
 

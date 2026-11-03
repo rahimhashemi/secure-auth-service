@@ -25,7 +25,7 @@ public class SecurityConfig {
     }
 
     @Bean
-    SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+    SecurityFilterChain filterChain(HttpSecurity http, com.simpath.app.security.ClientAddressResolver addresses) throws Exception {
         return http
                 .csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
@@ -41,8 +41,9 @@ public class SecurityConfig {
                 )
                 .httpBasic(AbstractHttpConfigurer::disable)
                 .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class)
-                .addFilterBefore(new RateLimitFilter(rateLimits), JwtAuthFilter.class)
+                .addFilterBefore(new RateLimitFilter(rateLimits, addresses), JwtAuthFilter.class)
                 .build();
     }
 }
+
 

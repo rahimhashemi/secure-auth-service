@@ -42,7 +42,7 @@ class RateLimitRedisTest {
     String client() { return UUID.randomUUID().toString(); }
 
     @Test void exactLimitAndIndependentAddressAndOperationBuckets() {
-        RateLimitService limits = new RateLimitService(first, true, 2, 3, 60);
+        RateLimitService limits = new RateLimitService(first, true, 2, 3, 60, 2, 2, 60, "test-only-secret");
         String ip = client();
         assertThat(limits.check("login", ip)).isZero();
         assertThat(limits.check("login", ip)).isZero();
@@ -55,7 +55,7 @@ class RateLimitRedisTest {
     }
 
     @Test void windowExpiresAndRejectedTrafficDoesNotExtendIt() {
-        RateLimitService limits = new RateLimitService(first, true, 1, 1, 1);
+        RateLimitService limits = new RateLimitService(first, true, 1, 1, 1, 2, 2, 60, "test-only-secret");
         String ip = client();
         assertThat(limits.check("login", ip)).isZero();
         assertThat(limits.check("login", ip)).isEqualTo(1);
@@ -63,8 +63,8 @@ class RateLimitRedisTest {
     }
 
     @Test void concurrentCallsAcrossIndependentClientsShareOneLimit() throws Exception {
-        RateLimitService left = new RateLimitService(first, true, 5, 5, 60);
-        RateLimitService right = new RateLimitService(second, true, 5, 5, 60);
+        RateLimitService left = new RateLimitService(first, true, 5, 5, 60, 2, 2, 60, "test-only-secret");
+        RateLimitService right = new RateLimitService(second, true, 5, 5, 60, 2, 2, 60, "test-only-secret");
         String ip = client();
         ExecutorService executor = Executors.newFixedThreadPool(8);
         CountDownLatch start = new CountDownLatch(1);
@@ -86,12 +86,32 @@ class RateLimitRedisTest {
 
     @Test void disabledLimiterDoesNotContactRedis() {
         StringRedisTemplate unused = mock(StringRedisTemplate.class);
-        assertThat(new RateLimitService(unused, false, 1, 1, 60).check("login", client())).isZero();
+        assertThat(new RateLimitService(unused, false, 1, 1, 60, 2, 2, 60, "test-only-secret").check("login", client())).isZero();
         verifyNoInteractions(unused);
     }
 
     @Test void invalidConfigurationIsRejected() {
-        assertThatThrownBy(() -> new RateLimitService(first, true, 0, 1, 60)).isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> new RateLimitService(first, true, 1, 1, 0)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new RateLimitService(first, true, 0, 1, 60, 2, 2, 60, "test-only-secret")).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new RateLimitService(first, true, 1, 1, 0, 2, 2, 60, "test-only-secret")).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test void accountBudgetIsSharedAcrossClientsAndNormalizesEmail() {
+        RateLimitService left = new RateLimitService(first, true, 10, 30, 60, 2, 2, 60, "test-secret");
+        RateLimitService right = new RateLimitService(second, true, 10, 30, 60, 2, 2, 60, "test-secret");
+        String email = client() + "@example.com";
+        left.enforceLoginAccount(email);
+        right.enforceLoginAccount(email.toUpperCase(java.util.Locale.ROOT));
+        assertThatThrownBy(() -> left.enforceLoginAccount(email))
+                .isInstanceOf(com.simpath.app.common.RateLimitExceededException.class);
+        right.enforceLoginAccount(client() + "@example.com");
+    }
+    @Test void registerHasItsOwnBudget() {
+        RateLimitService limits = new RateLimitService(first, true, 10, 30, 60, 2, 2, 60, "test-secret");
+        String ip = client();
+        assertThat(limits.check("register", ip)).isZero();
+        assertThat(limits.check("register", ip)).isZero();
+        assertThat(limits.check("register", ip)).isPositive();
+        assertThat(limits.check("login", ip)).isZero();
     }
 }
+
