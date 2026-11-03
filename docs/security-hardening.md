@@ -85,8 +85,9 @@ bean is shared by JWT signing and parsing. Database/container volumes are not re
 
 ## Remaining work
 
-Spring Boot is still 3.3.2. A framework upgrade must be handled in a separate migration
-with compatible Spring Security, springdoc and tests; these authentication changes
-must not be taken as resolving framework support or all dependency vulnerabilities.
+Spring Boot is upgraded to 4.1.2 with compatible springdoc and managed Security
+dependencies; see [the platform migration notes](spring-boot-upgrade.md). This does
+not establish that all dependencies are vulnerability-free.
 Immediate access-token invalidation, verified-email enrollment, recovery/MFA, breach
 password checks and comprehensive abuse protection remain outside this PR.
+

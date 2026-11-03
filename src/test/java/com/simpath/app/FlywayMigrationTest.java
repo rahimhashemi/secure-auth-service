@@ -4,7 +4,7 @@ import org.flywaydb.core.Flyway;
 import org.flywaydb.core.api.FlywayException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.testcontainers.containers.PostgreSQLContainer;
+import org.testcontainers.postgresql.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
@@ -18,7 +18,7 @@ import static org.assertj.core.api.Assertions.*;
 @Testcontainers
 class FlywayMigrationTest {
     @Container
-    static final PostgreSQLContainer<?> DB = new PostgreSQLContainer<>("postgres:16-alpine");
+    static final PostgreSQLContainer DB = new PostgreSQLContainer("postgres:16-alpine");
     private String schema;
     private Flyway flyway;
 
@@ -108,4 +108,5 @@ class FlywayMigrationTest {
         }
     }
 }
+
 

@@ -54,6 +54,12 @@ public class GlobalExceptionHandler {
                 .body(ApiError.of("VALIDATION_ERROR", "Constraint violation.", req.getRequestURI()));
     }
 
+    @ExceptionHandler(org.springframework.web.servlet.resource.NoResourceFoundException.class)
+    public ResponseEntity<ApiError> notFound(Exception ex, HttpServletRequest req) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(ApiError.of("NOT_FOUND", "Resource not found.", req.getRequestURI()));
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiError> fallback(Exception ex, HttpServletRequest req) {
         String errorId = java.util.UUID.randomUUID().toString();
@@ -63,4 +69,5 @@ public class GlobalExceptionHandler {
                 .body(ApiError.of("INTERNAL_ERROR", "Unexpected error.", req.getRequestURI()));
     }
 }
+
 
