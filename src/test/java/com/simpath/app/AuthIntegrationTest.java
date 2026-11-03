@@ -20,14 +20,14 @@ import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.http.MediaType;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.utility.DockerImageName;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
-import org.testcontainers.containers.PostgreSQLContainer;
+import org.testcontainers.postgresql.PostgreSQLContainer;
 import java.time.Instant;
 import java.util.UUID;
 import java.util.concurrent.*;
@@ -51,8 +51,8 @@ class AuthIntegrationTest {
         // Spring starts container beans first and stops them after dependent clients.
         @Bean
         @ServiceConnection
-        PostgreSQLContainer<?> postgres() {
-            return new PostgreSQLContainer<>("postgres:16-alpine");
+        PostgreSQLContainer postgres() {
+            return new PostgreSQLContainer("postgres:16-alpine");
         }
 
         @Bean
@@ -247,7 +247,13 @@ class AuthIntegrationTest {
         cleanup.cleanup();
         assertThat(tokens.findByUserId(userId)).hasSize(1).allMatch(t -> "cleanup-2".equals(t.getTokenHash()));
     }
+
+    @Test void apiDocumentationRemainsDisabledByDefault() throws Exception {
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/v3/api-docs"))
+                .andExpect(status().isNotFound());
+    }
 }
+
 
 
 

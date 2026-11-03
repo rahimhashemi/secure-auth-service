@@ -31,6 +31,8 @@ spring:
             time_zone: UTC
     show-sql: false
   jackson:
+    # Keep existing public JSON defaults while using Jackson 3.
+    use-jackson2-defaults: true
     time-zone: UTC
 
 server:
@@ -73,6 +75,7 @@ app:
   refresh-token:
     # server-side pepper to hash refresh tokens (keep in env)
     pepper: ${APP_REFRESH_PEPPER}
+
 
 
 

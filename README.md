@@ -1,6 +1,6 @@
 # Secure Auth Service
 
-A Java 17 / Spring Boot authentication sample with PostgreSQL-backed sessions.
+A Java 17 / Spring Boot 4.1.2 authentication sample with PostgreSQL-backed sessions.
 This is a portfolio project, not a production-ready identity provider.
 
 ## Implemented
@@ -16,6 +16,8 @@ This is a portfolio project, not a production-ready identity provider.
 - Swagger UI and a protected `/me` endpoint.
 - Shared Redis rate limits for login and refresh, with HTTP 429 and Retry-After.
 - Versioned PostgreSQL migrations with Flyway and Hibernate schema validation.
+
+Platform dependencies and migration notes: [Spring Boot upgrade](docs/spring-boot-upgrade.md).
 
 ## Run locally
 
@@ -167,6 +169,7 @@ suite runs with Flyway and production Hibernate validation, without `create-drop
 - Database locks serialize session operations per user, with no custom lock timeout policy.
 - Registration normalization/concurrency behavior and broader HTTP endpoint coverage need work.
 - Deployment hardening, TLS, browser credential storage and CSRF policy require a deployment-specific review.
+
 
 
 
