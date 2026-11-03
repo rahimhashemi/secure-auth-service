@@ -3,6 +3,7 @@ package com.simpath.app;
 import com.simpath.app.auth.dto.RegisterRequest;
 import com.simpath.app.auth.service.AuthService;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
@@ -26,6 +27,7 @@ import static org.assertj.core.api.Assertions.*;
         "app.jwt.secret=test-only-key-with-at-least-thirty-two-characters",
         "app.refresh-token.pepper=test-only-pepper",
         "spring.datasource.username=test", "spring.datasource.password=test",
+        "app.rate-limit.login-limit=3", "app.rate-limit.register-limit=3", "app.rate-limit.refresh-limit=3",
         "app.token-cleanup.cron=-", "spring.jpa.show-sql=false",
         "springdoc.api-docs.enabled=true", "springdoc.swagger-ui.enabled=true"
 })
@@ -35,6 +37,12 @@ class PlatformHttpIntegrationTest {
     @Autowired Environment environment;
     @Autowired JsonMapper json;
     @Autowired AuthService auth;
+    @Autowired org.springframework.data.redis.core.StringRedisTemplate redis;
+    @BeforeEach void clearRateLimits() {
+        try (org.springframework.data.redis.connection.RedisConnection connection = redis.getConnectionFactory().getConnection()) {
+            connection.serverCommands().flushDb();
+        }
+    }
     private final HttpClient client = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10)).followRedirects(HttpClient.Redirect.NORMAL).build();
 
@@ -98,4 +106,47 @@ class PlatformHttpIntegrationTest {
         assertThat(Instant.parse(error.path("timestamp").asText())).isNotNull();
         assertThat(error.path("path").asText()).isEqualTo("/auth/refresh");
     }
+
+    private void assertEncodedRouteSharesBudget(String canonical, String encoded) throws Exception {
+        // URI.create preserves the percent escape; do not double-encode through a URI template.
+        for (int i = 0; i < 3; i++) {
+            HttpResponse<String> response = post(i % 2 == 0 ? encoded : canonical, Map.of());
+            assertThat(response.statusCode()).isEqualTo(400);
+            // Prove the encoded request reached MVC validation, rather than being rejected by the firewall.
+            assertThat(json.readTree(response.body()).path("code").asText()).isEqualTo("VALIDATION_ERROR");
+        }
+        assertThat(post(canonical, Map.of()).statusCode()).isEqualTo(429);
+    }
+    @Test void encodedRegisterSharesIpBudget() throws Exception {
+        assertEncodedRouteSharesBudget("/auth/register", "/auth/regi%73ter");
+    }
+    @Test void encodedLoginSharesIpBudget() throws Exception {
+        assertEncodedRouteSharesBudget("/auth/login", "/auth/log%69n");
+    }
+    @Test void encodedRefreshSharesIpBudget() throws Exception {
+        assertEncodedRouteSharesBudget("/auth/refresh", "/auth/refre%73h");
+    }
+    @Test void encodedLoginIgnoresStaleBearerLikeCanonicalLogin() throws Exception {
+        String email = "encoded-login@example.com";
+        String password = "Correct-Horse-123!";
+        auth.register(new RegisterRequest(email, password));
+        HttpResponse<String> response = client.send(HttpRequest.newBuilder(url("/auth/log%69n"))
+                .timeout(Duration.ofSeconds(10)).header("Content-Type", "application/json")
+                .header("Authorization", "Bearer stale")
+                .POST(HttpRequest.BodyPublishers.ofString(json.writeValueAsString(Map.of("email", email, "password", password))))
+                .build(), HttpResponse.BodyHandlers.ofString());
+        assertThat(response.statusCode()).isEqualTo(200);
+    }
+    @Test void wrongMethodPreserves405AndAllowHeader() throws Exception {
+        HttpResponse<String> response = get("/auth/login");
+        assertThat(response.statusCode()).isEqualTo(405);
+        assertThat(response.headers().firstValue("Allow").orElse("")).contains("POST");
+    }
+    @Test void unsupportedMediaTypePreserves415() throws Exception {
+        HttpResponse<String> response = client.send(HttpRequest.newBuilder(url("/auth/login"))
+                .timeout(Duration.ofSeconds(10)).header("Content-Type", "text/plain")
+                .POST(HttpRequest.BodyPublishers.ofString("not-json")).build(), HttpResponse.BodyHandlers.ofString());
+        assertThat(response.statusCode()).isEqualTo(415);
+    }
 }
+
