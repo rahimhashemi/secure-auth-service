@@ -79,17 +79,48 @@ public class RateLimitService {
         return consume(key, limit, windowMillis);
     }
 
+    // Account checks do not consume capacity. Only completed credential failures do.
+    private static final DefaultRedisScript<Long> ACCOUNT_CHECK = new DefaultRedisScript<>("""
+            local count = tonumber(redis.call('GET', KEYS[1]) or '0')
+            if count < tonumber(ARGV[1]) then return 0 end
+            local ttl = redis.call('PTTL', KEYS[1])
+            if ttl < 0 then
+                redis.call('PEXPIRE', KEYS[1], ARGV[2])
+                ttl = tonumber(ARGV[2])
+            end
+            return math.max(ttl, 1)
+            """, Long.class);
+
     public void enforceLoginAccount(String normalizedEmail) {
         if (!enabled) return;
         try {
-            javax.crypto.Mac mac = javax.crypto.Mac.getInstance("HmacSHA256");
-            mac.init(new javax.crypto.spec.SecretKeySpec(accountKeySecret.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
-            String digest = HexFormat.of().formatHex(mac.doFinal(normalizedEmail.trim()
-                    .toLowerCase(java.util.Locale.ROOT).getBytes(StandardCharsets.UTF_8)));
-            long retryAfter = consume("secure-auth:rate-limit:v1:account:" + digest, accountLimit, accountWindowMillis);
-            if (retryAfter > 0) throw new com.simpath.app.common.RateLimitExceededException(retryAfter);
+            Long retryMillis = redis.execute(ACCOUNT_CHECK, List.of(accountKey(normalizedEmail)),
+                    Integer.toString(accountLimit), Long.toString(accountWindowMillis));
+            if (retryMillis == null || retryMillis < 0) {
+                throw new DataAccessResourceFailureException("Account rate limit decision unavailable.");
+            }
+            if (retryMillis > 0) throw new com.simpath.app.common.RateLimitExceededException((retryMillis + 999) / 1000);
         } catch (org.springframework.dao.DataAccessException ex) {
             throw new com.simpath.app.common.RateLimitUnavailableException(ex);
+        }
+    }
+
+    public void recordFailedLogin(String normalizedEmail) {
+        if (!enabled) return;
+        try {
+            // Saturate at the limit; additional concurrent failures never prolong the window.
+            consume(accountKey(normalizedEmail), accountLimit, accountWindowMillis);
+        } catch (org.springframework.dao.DataAccessException ex) {
+            throw new com.simpath.app.common.RateLimitUnavailableException(ex);
+        }
+    }
+
+    private String accountKey(String email) {
+        try {
+            javax.crypto.Mac mac = javax.crypto.Mac.getInstance("HmacSHA256");
+            mac.init(new javax.crypto.spec.SecretKeySpec(accountKeySecret.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
+            String digest = HexFormat.of().formatHex(mac.doFinal(EmailNormalizer.normalize(email).getBytes(StandardCharsets.UTF_8)));
+            return "secure-auth:rate-limit:v2:account-failures:" + digest;
         } catch (java.security.GeneralSecurityException ex) {
             throw new IllegalStateException("Cannot hash account rate-limit key", ex);
         }

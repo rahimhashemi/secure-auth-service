@@ -100,7 +100,9 @@ class RateLimitRedisTest {
         RateLimitService right = new RateLimitService(second, true, 10, 30, 60, 2, 2, 60, "test-secret");
         String email = client() + "@example.com";
         left.enforceLoginAccount(email);
+        left.recordFailedLogin(email);
         right.enforceLoginAccount(email.toUpperCase(java.util.Locale.ROOT));
+        right.recordFailedLogin(email.toUpperCase(java.util.Locale.ROOT));
         assertThatThrownBy(() -> left.enforceLoginAccount(email))
                 .isInstanceOf(com.simpath.app.common.RateLimitExceededException.class);
         right.enforceLoginAccount(client() + "@example.com");
@@ -113,5 +115,31 @@ class RateLimitRedisTest {
         assertThat(limits.check("register", ip)).isPositive();
         assertThat(limits.check("login", ip)).isZero();
     }
+    @Test void accountChecksDoNotConsumeAndFailureWindowExpires() {
+        RateLimitService limits = new RateLimitService(first, true, 10, 30, 60, 2, 2, 1, "test-secret");
+        String email = client() + "@example.com";
+        for (int i = 0; i < 10; i++) limits.enforceLoginAccount(email);
+        limits.recordFailedLogin(email);
+        limits.enforceLoginAccount(email);
+        limits.recordFailedLogin(email);
+        assertThatThrownBy(() -> limits.enforceLoginAccount(email))
+                .isInstanceOf(com.simpath.app.common.RateLimitExceededException.class);
+        await().atMost(Duration.ofSeconds(5)).untilAsserted(() -> assertThatCode(() -> limits.enforceLoginAccount(email)).doesNotThrowAnyException());
+    }
+
+    @Test void concurrentFailuresSaturateWithoutExtendingAccountWindow() throws Exception {
+        RateLimitService limits = new RateLimitService(first, true, 10, 30, 60, 2, 2, 60, "test-secret");
+        String email = client() + "@example.com";
+        ExecutorService executor = Executors.newFixedThreadPool(8);
+        List<Future<?>> results = new ArrayList<>();
+        try {
+            for (int i = 0; i < 40; i++) results.add(executor.submit(() -> limits.recordFailedLogin(email)));
+            for (Future<?> result : results) result.get(10, TimeUnit.SECONDS);
+            assertThatThrownBy(() -> limits.enforceLoginAccount(email))
+                    .isInstanceOf(com.simpath.app.common.RateLimitExceededException.class);
+        } finally { executor.shutdownNow(); }
+    }
+
 }
+
 

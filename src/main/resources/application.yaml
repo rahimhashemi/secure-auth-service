@@ -58,6 +58,8 @@ app:
     enabled: ${APP_TOKEN_CLEANUP_ENABLED:true}
     retention-days: ${APP_TOKEN_CLEANUP_RETENTION_DAYS:30}
     batch-size: ${APP_TOKEN_CLEANUP_BATCH_SIZE:1000}
+    max-batches: ${APP_TOKEN_CLEANUP_MAX_BATCHES:10}
+    max-runtime-seconds: ${APP_TOKEN_CLEANUP_MAX_RUNTIME_SECONDS:5}
   rate-limit:
     account-key: ${APP_RATE_LIMIT_ACCOUNT_KEY}
     enabled: ${APP_RATE_LIMIT_ENABLED:true}
