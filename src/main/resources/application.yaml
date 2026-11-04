@@ -59,6 +59,7 @@ app:
     retention-days: ${APP_TOKEN_CLEANUP_RETENTION_DAYS:30}
     batch-size: ${APP_TOKEN_CLEANUP_BATCH_SIZE:1000}
   rate-limit:
+    account-key: ${APP_RATE_LIMIT_ACCOUNT_KEY}
     enabled: ${APP_RATE_LIMIT_ENABLED:true}
     login-limit: ${APP_RATE_LIMIT_LOGIN_LIMIT:10}
     register-limit: ${APP_RATE_LIMIT_REGISTER_LIMIT:5}
@@ -75,6 +76,7 @@ app:
   refresh-token:
     # server-side pepper to hash refresh tokens (keep in env)
     pepper: ${APP_REFRESH_PEPPER}
+
 
 
 

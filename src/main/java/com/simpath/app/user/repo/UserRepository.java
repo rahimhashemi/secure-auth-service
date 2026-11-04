@@ -11,7 +11,7 @@ public interface UserRepository extends JpaRepository<User, UUID> {
     @org.springframework.data.jpa.repository.Query("select u from User u where u.id = :id")
     Optional<User> lockById(@org.springframework.data.repository.query.Param("id") UUID id);
 
-    Optional<User> findByEmailIgnoreCase(String email);
+    Optional<User> findByEmail(String email);
 
     @org.springframework.data.jpa.repository.Modifying
     @org.springframework.data.jpa.repository.Query(value = """
@@ -24,4 +24,5 @@ public interface UserRepository extends JpaRepository<User, UUID> {
                        @org.springframework.data.repository.query.Param("hash") String hash,
                        @org.springframework.data.repository.query.Param("createdAt") java.time.Instant createdAt);
 }
+
 

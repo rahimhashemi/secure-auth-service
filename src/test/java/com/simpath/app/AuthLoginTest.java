@@ -23,7 +23,7 @@ class AuthLoginTest {
     private final AuthService auth = new AuthService(users, passwords, mock(JwtService.class),
             mock(RefreshTokenService.class), mock(AuditService.class), limits);
     @Test void unknownUserStillPerformsPasswordComparison() {
-        when(users.findByEmailIgnoreCase("absent@example.com")).thenReturn(Optional.empty());
+        when(users.findByEmail("absent@example.com")).thenReturn(Optional.empty());
         assertThatThrownBy(() -> auth.login(new LoginRequest("absent@example.com", "wrong"), "test", "ip"))
                 .isInstanceOf(InvalidCredentialsException.class);
         verify(passwords).matches("wrong", null);
@@ -31,7 +31,7 @@ class AuthLoginTest {
     }
     @Test void disabledUserStillPerformsPasswordComparison() {
         User user = new User(); user.setEnabled(false); user.setPasswordHash("stored");
-        when(users.findByEmailIgnoreCase("disabled@example.com")).thenReturn(Optional.of(user));
+        when(users.findByEmail("disabled@example.com")).thenReturn(Optional.of(user));
         assertThatThrownBy(() -> auth.login(new LoginRequest("disabled@example.com", "wrong"), "test", "ip"))
                 .isInstanceOf(InvalidCredentialsException.class);
         verify(passwords).matches("wrong", "stored");
@@ -43,3 +43,4 @@ class AuthLoginTest {
         verify(users).insertIfAbsent(any(), eq("existing@example.com"), eq("hash"), any());
     }
 }
+

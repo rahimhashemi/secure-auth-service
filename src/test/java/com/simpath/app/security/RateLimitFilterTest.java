@@ -11,7 +11,7 @@ import static org.mockito.Mockito.*;
 
 class RateLimitFilterTest {
     private final RateLimitService service = mock(RateLimitService.class);
-    private final RateLimitFilter filter = new RateLimitFilter(service, new ClientAddressResolver(""));
+    private final RateLimitFilter filter = new RateLimitFilter(service, new ClientAddressResolver(""), new com.simpath.app.common.ApiErrorWriter(tools.jackson.databind.json.JsonMapper.builder().findAndAddModules().build()));
 
     @Test void rejectedLoginReturns429AndRetryAfterWithoutCallingEndpoint() throws Exception {
         MockHttpServletRequest request = new MockHttpServletRequest("POST", "/auth/login");
@@ -69,4 +69,5 @@ class RateLimitFilterTest {
                 new MockHttpServletResponse(), chain)).isInstanceOf(ServletException.class);
     }
 }
+
 

@@ -33,9 +33,9 @@ The existing per-IP login and refresh limits remain. Add:
 | `APP_RATE_LIMIT_ACCOUNT_WINDOW_SECONDS` | 300 | account window duration |
 
 The account bucket is independent of client IP and applies to both existing and
-unknown accounts, successes and failures. Keys use HMAC-SHA256 with the configured
-refresh pepper; no email or password appears in a Redis key. Rotating that secret
-also resets account buckets. Rejections do not prolong the bucket's TTL. There is
+unknown accounts, successes and failures. Keys use HMAC-SHA256 with the independent
+`APP_RATE_LIMIT_ACCOUNT_KEY`; no email or password appears in a Redis key. Rotating that account secret
+resets account buckets without affecting refresh tokens. Rejections do not prolong the bucket's TTL. There is
 no persistent account lock flag; an attacker can nevertheless consume the budget
 again in subsequent windows. This is a throttling/availability tradeoff, not complete
 credential-stuffing or account-lockout-DoS prevention. Redis failures fail closed with
@@ -90,4 +90,5 @@ dependencies; see [the platform migration notes](spring-boot-upgrade.md). This d
 not establish that all dependencies are vulnerability-free.
 Immediate access-token invalidation, verified-email enrollment, recovery/MFA, breach
 password checks and comprehensive abuse protection remain outside this PR.
+
 

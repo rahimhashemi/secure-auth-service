@@ -37,6 +37,7 @@ import static org.assertj.core.api.Assertions.*;
     "app.jwt.secret=test-only-key-with-at-least-thirty-two-characters",
     "spring.datasource.username=test", "spring.datasource.password=test",
     "app.refresh-token.pepper=test-only-pepper",
+        "app.rate-limit.account-key=test-only-account-key",
     "app.token-cleanup.enabled=true", "app.token-cleanup.cron=-",
     "app.token-cleanup.batch-size=1", "app.rate-limit.account-limit=3",
     "app.rate-limit.login-limit=3", "app.rate-limit.refresh-limit=2",
@@ -80,7 +81,7 @@ class AuthIntegrationTest {
         }
         tokens.deleteAll(); audit.deleteAll(); users.deleteAll();
         auth.register(new RegisterRequest("rahim@example.com", "Correct-Horse-123!"));
-        userId = users.findByEmailIgnoreCase("rahim@example.com").orElseThrow().getId();
+        userId = users.findByEmail("rahim@example.com").orElseThrow().getId();
     }
     AuthResponse login() { return auth.login(new LoginRequest("rahim@example.com", "Correct-Horse-123!"), "test", "127.0.0.1"); }
     @Test void expiredRefreshIsRejectedWithoutCreatingSuccessor() {
@@ -98,7 +99,8 @@ class AuthIntegrationTest {
         assertThatThrownBy(() -> auth.refresh(new RefreshRequest(session.refreshToken()), "test", "ip"))
             .isInstanceOf(InvalidRefreshTokenException.class);
         assertThat(tokens.findByUserId(userId)).allMatch(t -> t.getRevokedAt() != null);
-        assertThat(audit.findAll()).anyMatch(e -> "REFRESH_REUSE".equals(e.getType()));
+        assertThat(audit.findAll()).anyMatch(e -> "REFRESH_REUSE".equals(e.getType())
+                && userId.equals(e.getUserId()) && e.getDetail().contains("reason=REUSE;familyId="));
         assertThatThrownBy(() -> auth.refresh(new RefreshRequest(next.refreshToken()), "test", "ip"))
             .isInstanceOf(InvalidRefreshTokenException.class);
     }
@@ -172,7 +174,7 @@ class AuthIntegrationTest {
     }
 
     @Test void applicationStartsAgainstFlywaySchemaWithoutHibernateCreatingTables() {
-        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("2");
+        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("3");
         assertThat(flyway.info().pending()).isEmpty();
         assertThat(jdbc.queryForObject(
                 "select count(*) from flyway_schema_history where version = '1' and success = true", Integer.class))
@@ -199,7 +201,7 @@ class AuthIntegrationTest {
         String body = "{\"email\":\"new@example.com\",\"password\":\"Correct-Horse-123!\"}";
         mvc.perform(post("/auth/register").contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isOk());
         mvc.perform(post("/auth/register").contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isOk());
-        assertThat(users.findByEmailIgnoreCase("new@example.com")).isPresent();
+        assertThat(users.findByEmail("new@example.com")).isPresent();
     }
     @Test void registrationIsThrottledBeforePasswordHashing() throws Exception {
         for (int i = 0; i < 5; i++) {
@@ -252,7 +254,13 @@ class AuthIntegrationTest {
         mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/v3/api-docs"))
                 .andExpect(status().isNotFound());
     }
+
+    @Test void normalizedLoginUsesTheCanonicalStoredEmail() {
+        AuthResponse response = auth.login(new LoginRequest("RAHIM@example.com", "Correct-Horse-123!"), "test", "ip");
+        assertThat(response.accessToken()).isNotBlank();
+    }
 }
+
 
 
 

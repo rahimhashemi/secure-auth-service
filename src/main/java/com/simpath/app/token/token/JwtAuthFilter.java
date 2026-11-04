@@ -21,20 +21,21 @@ public class JwtAuthFilter extends OncePerRequestFilter {
 
     private final SecretKey key;
     private final String issuer;
+    private final com.simpath.app.common.ApiErrorWriter errors;
 
     public JwtAuthFilter(
             SecretKey key,
-            @Value("${app.jwt.issuer}") String issuer
+            @Value("${app.jwt.issuer}") String issuer,
+            com.simpath.app.common.ApiErrorWriter errors
     ) {
         this.key = key;
         this.issuer = issuer;
+        this.errors = errors;
     }
 
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
-        String path = request.getRequestURI().substring(request.getContextPath().length());
-        return "POST".equals(request.getMethod()) && ("/auth/login".equals(path)
-                || "/auth/register".equals(path) || "/auth/refresh".equals(path));
+        return com.simpath.app.security.AuthEndpointMatcher.operation(request) != null;
     }
 
     @Override
@@ -67,16 +68,12 @@ public class JwtAuthFilter extends OncePerRequestFilter {
         } catch (io.jsonwebtoken.JwtException | IllegalArgumentException ex) {
             // If token invalid, clear context and continue (will be blocked by security if needed)
             SecurityContextHolder.clearContext();
-            try {
-                response.setStatus(401);
-                response.setContentType("application/json");
-                response.getWriter().write("{\"error\":\"invalid_token\"}");
-            } catch (java.io.IOException ignored) {
-            }
+            errors.write(request, response, 401, "INVALID_TOKEN", "Invalid access token.");
             return;
         }
         filterChain.doFilter(request, response);
     }
 }
+
 
 

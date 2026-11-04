@@ -63,11 +63,13 @@ public class RefreshTokenService {
         // اگر قبلاً revoke شده یا rotate شده و دوباره استفاده شد => reuse
         if (current.getRevokedAt() != null || current.getReplacedBy() != null) {
             revokeAll(current.getUserId()); // واکنش امنیتی شدید
-            throw new InvalidRefreshTokenException("Refresh token reuse detected. All sessions revoked.");
+            throw new InvalidRefreshTokenException(InvalidRefreshTokenException.Reason.REUSE, current.getUserId(),
+                    current.getFamilyId(), "Refresh token reuse detected. All sessions revoked.");
         }
 
         if (current.getExpiresAt() == null || !current.getExpiresAt().isAfter(now)) {
-            throw new InvalidRefreshTokenException("Refresh token expired.");
+            throw new InvalidRefreshTokenException(InvalidRefreshTokenException.Reason.EXPIRED, current.getUserId(),
+                    current.getFamilyId(), "Refresh token expired.");
         }
 
         // Revoke current & rotate
@@ -116,7 +118,7 @@ public class RefreshTokenService {
         lockOwner(hash);
         Instant now = Instant.now();
         RefreshToken current = repo.findByTokenHash(hash).orElseThrow(() ->
-                new IllegalArgumentException("Invalid refresh token.")
+                new InvalidRefreshTokenException("Invalid refresh token.")
         );
 
         if (current.getRevokedAt() == null) {
@@ -178,7 +180,8 @@ public class RefreshTokenService {
         com.simpath.app.user.entity.User user = users.lockById(userId)
                 .orElseThrow(() -> new InvalidRefreshTokenException("Invalid refresh token."));
         if (!user.isEnabled()) {
-            throw new InvalidRefreshTokenException("User is disabled.");
+            throw new InvalidRefreshTokenException(InvalidRefreshTokenException.Reason.USER_DISABLED, userId, null, "User is disabled.");
         }
     }
 }
+

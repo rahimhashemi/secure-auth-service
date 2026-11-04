@@ -8,7 +8,7 @@ import org.springframework.mock.web.MockHttpServletResponse;
 import static org.assertj.core.api.Assertions.*;
 
 class JwtAuthFilterTest {
-    private final JwtAuthFilter filter = new JwtAuthFilter(io.jsonwebtoken.security.Keys.hmacShaKeyFor("test-only-key-with-at-least-thirty-two-characters".getBytes(java.nio.charset.StandardCharsets.UTF_8)), "test");
+    private final JwtAuthFilter filter = new JwtAuthFilter(io.jsonwebtoken.security.Keys.hmacShaKeyFor("test-only-key-with-at-least-thirty-two-characters".getBytes(java.nio.charset.StandardCharsets.UTF_8)), "test", new com.simpath.app.common.ApiErrorWriter(tools.jackson.databind.json.JsonMapper.builder().findAndAddModules().build()));
     @Test void downstreamFailureIsNotRewrittenAsInvalidToken() {
         MockHttpServletResponse response = new MockHttpServletResponse();
         assertThatThrownBy(() -> filter.doFilter(new MockHttpServletRequest(), response,
@@ -34,4 +34,5 @@ class JwtAuthFilterTest {
         assertThat(response.getStatus()).isEqualTo(200);
     }
 }
+
 

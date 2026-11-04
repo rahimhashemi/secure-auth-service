@@ -25,7 +25,7 @@ public class SecurityConfig {
     }
 
     @Bean
-    SecurityFilterChain filterChain(HttpSecurity http, com.simpath.app.security.ClientAddressResolver addresses) throws Exception {
+    SecurityFilterChain filterChain(HttpSecurity http, com.simpath.app.security.ClientAddressResolver addresses, com.simpath.app.common.ApiErrorWriter errors) throws Exception {
         return http
                 .csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
@@ -39,11 +39,17 @@ public class SecurityConfig {
                         ).permitAll()
                         .anyRequest().authenticated()
                 )
+                .exceptionHandling(exceptions -> exceptions
+                        .authenticationEntryPoint((request, response, ex) ->
+                                errors.write(request, response, 401, "UNAUTHORIZED", "Authentication required."))
+                        .accessDeniedHandler((request, response, ex) ->
+                                errors.write(request, response, 403, "FORBIDDEN", "Access denied.")))
                 .httpBasic(AbstractHttpConfigurer::disable)
                 .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class)
-                .addFilterBefore(new RateLimitFilter(rateLimits, addresses), JwtAuthFilter.class)
+                .addFilterBefore(new RateLimitFilter(rateLimits, addresses, errors), JwtAuthFilter.class)
                 .build();
     }
 }
+
 
 

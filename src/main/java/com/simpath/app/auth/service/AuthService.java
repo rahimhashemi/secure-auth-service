@@ -32,7 +32,7 @@ public class AuthService {
 
     @Transactional
     public void register(RegisterRequest req) {
-        String email = req.email().trim().toLowerCase(java.util.Locale.ROOT);
+        String email = com.simpath.app.security.EmailNormalizer.normalize(req.email());
         String passwordHash = passwordService.hash(req.password());
         // Hash in both cases; atomically suppress only the duplicate email conflict.
         users.insertIfAbsent(java.util.UUID.randomUUID(), email, passwordHash, java.time.Instant.now());
@@ -40,9 +40,9 @@ public class AuthService {
 
     @Transactional
     public AuthResponse login(LoginRequest req, String userAgent, String ip) {
-        String email = req.email().trim().toLowerCase(java.util.Locale.ROOT);
+        String email = com.simpath.app.security.EmailNormalizer.normalize(req.email());
         rateLimits.enforceLoginAccount(email);
-        User u = users.findByEmailIgnoreCase(email).orElse(null);
+        User u = users.findByEmail(email).orElse(null);
 
         boolean passwordMatches = passwordService.matches(req.password(), u == null ? null : u.getPasswordHash());
         if (u == null || !u.isEnabled() || !passwordMatches) {
@@ -69,8 +69,8 @@ public class AuthService {
             String access = jwtService.issueAccessToken(user.getId(), user.getEmail());
             return new AuthResponse(access, jwtService.getAccessTtlSeconds(), rotated.refreshTokenPlain(), rotated.expiresInSeconds());
         } catch (InvalidRefreshTokenException ex) {
-            audit.log(ex.getMessage().contains("reuse detected") ? "REFRESH_REUSE" : "REFRESH_FAIL",
-                    null, ex.getMessage(), ip, userAgent);
+            audit.log(ex.getReason() == InvalidRefreshTokenException.Reason.REUSE ? "REFRESH_REUSE" : "REFRESH_FAIL",
+                    ex.getUserId(), "reason=" + ex.getReason().name() + ";familyId=" + ex.getFamilyId(), ip, userAgent);
             throw ex;
         }
     }
@@ -90,4 +90,5 @@ public class AuthService {
     }
 
 }
+
 

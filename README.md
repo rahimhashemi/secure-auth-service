@@ -17,6 +17,8 @@ This is a portfolio project, not a production-ready identity provider.
 - Shared Redis rate limits for login and refresh, with HTTP 429 and Retry-After.
 - Versioned PostgreSQL migrations with Flyway and Hibernate schema validation.
 
+Latest routing/security corrections: [routing and audit repair](docs/auth-routing-and-audit.md).
+
 Platform dependencies and migration notes: [Spring Boot upgrade](docs/spring-boot-upgrade.md).
 
 ## Run locally
@@ -28,6 +30,7 @@ and keep them outside source control:
 export POSTGRES_PASSWORD="$(openssl rand -hex 24)"
 export APP_JWT_SECRET="$(openssl rand -hex 32)"
 export APP_REFRESH_PEPPER="$(openssl rand -hex 32)"
+export APP_RATE_LIMIT_ACCOUNT_KEY="$(openssl rand -hex 32)"
 docker compose up --build
 ```
 
@@ -169,6 +172,7 @@ suite runs with Flyway and production Hibernate validation, without `create-drop
 - Database locks serialize session operations per user, with no custom lock timeout policy.
 - Registration normalization/concurrency behavior and broader HTTP endpoint coverage need work.
 - Deployment hardening, TLS, browser credential storage and CSRF policy require a deployment-specific review.
+
 
 
 
