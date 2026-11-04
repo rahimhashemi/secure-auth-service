@@ -66,7 +66,7 @@ GROUP BY token_hash
 HAVING COUNT(*) > 1;
 ```
 
-An hourly scheduler drains up to 10 batches of 1000 rows expired more than 30 days
+An hourly scheduler drains up to 10 batches of up to 1000 refresh tokens and 1000 sessions expired more than 30 days
 ago per instance. Every batch commits in its own `REQUIRES_NEW` transaction through
 a separate service. It stops on a partial batch, a database failure, the batch cap,
 or when the five-second runtime budget is reached between batches. The runtime
@@ -85,7 +85,7 @@ sessions. An unexpired reused token revokes only its family, including the rotat
 successor. Other families remain valid. Retention is for audit/history, not a retry
 grace period. There is no idempotent refresh retry: clients must serialize refresh
 and must not retry a consumed token blindly. After purge, a token is unknown and
-rejected without revocation. Already-issued access JWTs remain valid until expiry.
+rejected without revocation. Already-issued access JWTs are rejected on the next request after session revocation.
 
 ## Deployment defaults
 

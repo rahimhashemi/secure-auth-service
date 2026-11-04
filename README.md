@@ -83,8 +83,10 @@ though the request returns 401. Clients must serialize refresh requests:
 two concurrent requests using the same token cause one rotation and then reuse
 revocation, so the returned successor is also revoked.
 
-Logout, reuse revocation, and account disablement do not immediately invalidate
-already issued access tokens. They remain usable until JWT expiry.
+Access JWTs carry a required `sid`. Every authenticated request checks the session
+and the user's enabled state in PostgreSQL. Logout, family reuse revocation and
+logout-all invalidate the corresponding access tokens on the next request. A request
+already authorized and running may finish. See [session management](docs/session-management.md).
 
 Audit entries use independent transactions. Success entries describe an attempted
 operation and can remain if the surrounding transaction subsequently fails.
@@ -178,3 +180,16 @@ suite runs with Flyway and production Hibernate validation, without `create-drop
 
 
 
+
+## Manage sessions
+
+`GET /sessions?page=0&size=20` lists your active sessions (maximum size 100), including
+creation/last activity times, initial IP/user agent, expiry and a `current` flag.
+`DELETE /sessions/{id}` revokes one of your sessions; `DELETE /sessions/others` keeps
+only the calling session. Both return 204. Supply an access token in the Bearer header.
+Unknown or another user's session id returns the same 204 without changing that user.
+
+**V4 deployment cutover:** stop old instances before migrating and start only the
+new version afterwards. V4 revokes legacy refresh tokens; JWTs without `sid` are
+rejected. All existing users must sign in again. Do not run old and new versions
+concurrently or roll back the binary: old binaries do not enforce session revocation.
