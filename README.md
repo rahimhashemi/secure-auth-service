@@ -38,9 +38,9 @@ The Dockerfile builds the JAR; no prebuilt `target` directory is required.
 PostgreSQL and Redis ports are bound to localhost. Redis is required for login
 and refresh rate limiting and Compose waits for its health check.
 
-- API: http://localhost:8080
-- Swagger (opt-in with `APP_API_DOCS_ENABLED=true`): http://localhost:8080/swagger-ui.html
-- Health: http://localhost:8080/actuator/health
+- API: http://localhost:8081
+- Swagger (opt-in with `APP_API_DOCS_ENABLED=true`): http://localhost:8081/swagger-ui.html
+- Health: http://localhost:8081/actuator/health
 
 JWT secret and refresh pepper are required configuration. The JWT secret must have
 at least 32 UTF-8 bytes. Database credentials must be configured explicitly; Compose requires
@@ -50,21 +50,21 @@ key invalidates existing access tokens. Key rotation is not implemented.
 ## API examples
 
 ```bash
-curl -X POST localhost:8080/auth/register \
+curl -X POST localhost:8081/auth/register \
   -H 'Content-Type: application/json' \
   -d '{"email":"test@example.com","password":"Correct-Horse-123!"}'
 
-curl -X POST localhost:8080/auth/login \
+curl -X POST localhost:8081/auth/login \
   -H 'Content-Type: application/json' \
   -d '{"email":"test@example.com","password":"Correct-Horse-123!"}'
 
-curl localhost:8080/me -H 'Authorization: Bearer <ACCESS_TOKEN>'
+curl localhost:8081/me -H 'Authorization: Bearer <ACCESS_TOKEN>'
 
-curl -X POST localhost:8080/auth/refresh \
+curl -X POST localhost:8081/auth/refresh \
   -H 'Content-Type: application/json' \
   -d '{"refreshToken":"<REFRESH_TOKEN>"}'
 
-curl -X POST localhost:8080/auth/logout \
+curl -X POST localhost:8081/auth/logout \
   -H 'Content-Type: application/json' \
   -d '{"refreshToken":"<REFRESH_TOKEN>"}'
 ```
