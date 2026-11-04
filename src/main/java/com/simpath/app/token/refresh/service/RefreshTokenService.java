@@ -56,20 +56,20 @@ public class RefreshTokenService {
         RefreshToken current = repo.findByTokenHash(hash).orElse(null);
 
         if (current == null) {
-            // Reuse or unknown token: in a real system you might revoke all sessions for the user
+            // An unknown token cannot identify a session to revoke.
             throw new InvalidRefreshTokenException("Invalid refresh token (possible reuse).");
         }
 
-        // اگر قبلاً revoke شده یا rotate شده و دوباره استفاده شد => reuse
-        if (current.getRevokedAt() != null || current.getReplacedBy() != null) {
-            revokeAll(current.getUserId()); // واکنش امنیتی شدید
-            throw new InvalidRefreshTokenException(InvalidRefreshTokenException.Reason.REUSE, current.getUserId(),
-                    current.getFamilyId(), "Refresh token reuse detected. All sessions revoked.");
-        }
-
+        // Expired history must never invalidate a live session.
         if (current.getExpiresAt() == null || !current.getExpiresAt().isAfter(now)) {
             throw new InvalidRefreshTokenException(InvalidRefreshTokenException.Reason.EXPIRED, current.getUserId(),
                     current.getFamilyId(), "Refresh token expired.");
+        }
+
+        if (current.getRevokedAt() != null || current.getReplacedBy() != null) {
+            revokeFamily(current.getUserId(), current.getFamilyId());
+            throw new InvalidRefreshTokenException(InvalidRefreshTokenException.Reason.REUSE, current.getUserId(),
+                    current.getFamilyId(), "Refresh token reuse detected. Session family revoked.");
         }
 
         // Revoke current & rotate

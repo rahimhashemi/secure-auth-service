@@ -29,11 +29,15 @@ The existing per-IP login and refresh limits remain. Add:
 | Variable | Default | Scope |
 | --- | --- | --- |
 | `APP_RATE_LIMIT_REGISTER_LIMIT` | 5 | registrations / IP / existing 60-second window |
-| `APP_RATE_LIMIT_ACCOUNT_LIMIT` | 10 | login attempts / normalized account |
+| `APP_RATE_LIMIT_ACCOUNT_LIMIT` | 10 | failed logins / normalized account |
 | `APP_RATE_LIMIT_ACCOUNT_WINDOW_SECONDS` | 300 | account window duration |
 
 The account bucket is independent of client IP and applies to both existing and
-unknown accounts, successes and failures. Keys use HMAC-SHA256 with the independent
+unknown accounts. Admission checks the failure count before BCrypt; only completed
+credential failures consume it. Successful login neither consumes nor resets failures.
+Concurrent requests admitted before the failure threshold is reached can exceed that
+threshold; this is not a strict bound on in-flight BCrypt work. The IP limiter still
+counts every request. Keys use HMAC-SHA256 with the independent
 `APP_RATE_LIMIT_ACCOUNT_KEY`; no email or password appears in a Redis key. Rotating that account secret
 resets account buckets without affecting refresh tokens. Rejections do not prolong the bucket's TTL. There is
 no persistent account lock flag; an attacker can nevertheless consume the budget
@@ -62,16 +66,26 @@ GROUP BY token_hash
 HAVING COUNT(*) > 1;
 ```
 
-An hourly application scheduler deletes at most 1000 rows expired more than 30 days
-ago per instance. Configure `APP_TOKEN_CLEANUP_ENABLED`, `APP_TOKEN_CLEANUP_RETENTION_DAYS`
-and `APP_TOKEN_CLEANUP_BATCH_SIZE` (1..10000); `app.token-cleanup.cron` controls scheduling.
-The retention period is at least one day. Deletes are bounded and transactional,
-with an expiry index. Multiple instances can delete in overlapping batches safely,
-but throughput/locking and retention backlog should be monitored.
+An hourly scheduler drains up to 10 batches of 1000 rows expired more than 30 days
+ago per instance. Every batch commits in its own `REQUIRES_NEW` transaction through
+a separate service. It stops on a partial batch, a database failure, the batch cap,
+or when the five-second runtime budget is reached between batches. The runtime
+budget does not cancel a running database statement; monitor database statement
+latency and configure database timeouts as appropriate for the deployment.
 
-Old rotated tokens are retained for the grace period to support reuse detection.
-After a row is purged it is unknown and rejected, but cannot trigger family-wide
-reuse revocation. Active tokens and more recent history remain.
+Configure `APP_TOKEN_CLEANUP_ENABLED`, `APP_TOKEN_CLEANUP_RETENTION_DAYS` (at least 1),
+`APP_TOKEN_CLEANUP_BATCH_SIZE` (1..10000), `APP_TOKEN_CLEANUP_MAX_BATCHES` (1..1000), and
+`APP_TOKEN_CLEANUP_MAX_RUNTIME_SECONDS` (1..300). `app.token-cleanup.cron` controls scheduling.
+Multiple instances can delete overlapping batches safely, but lock contention and
+retention backlog still need monitoring. The caps intentionally bound work per run;
+raise capacity or scheduling frequency if expiration exceeds cleanup throughput.
+
+Expired history is rejected before reuse detection, so it cannot invalidate live
+sessions. An unexpired reused token revokes only its family, including the rotated
+successor. Other families remain valid. Retention is for audit/history, not a retry
+grace period. There is no idempotent refresh retry: clients must serialize refresh
+and must not retry a consumed token blindly. After purge, a token is unknown and
+rejected without revocation. Already-issued access JWTs remain valid until expiry.
 
 ## Deployment defaults
 
