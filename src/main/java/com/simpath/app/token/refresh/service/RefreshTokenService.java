@@ -177,7 +177,7 @@ public class RefreshTokenService {
     private void lockUser(UUID userId) {
         com.simpath.app.user.entity.User user = users.lockById(userId)
                 .orElseThrow(() -> new InvalidRefreshTokenException("Invalid refresh token."));
-        if (!user.isEnabled()) {
+        if (!user.isEnabled() || !user.isEmailVerified()) {
             throw new InvalidRefreshTokenException(InvalidRefreshTokenException.Reason.USER_DISABLED, userId, null, "User is disabled.");
         }
     }

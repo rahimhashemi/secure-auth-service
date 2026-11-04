@@ -36,11 +36,11 @@ class FlywayMigrationTest {
     }
 
     @Test void emptyDatabaseGetsAllTablesAndIndexes() throws Exception {
-        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(4);
+        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(5);
         try (Connection connection = connect(); Statement sql = connection.createStatement()) {
-            try (ResultSet result = sql.executeQuery("select count(*) from information_schema.tables where table_schema = current_schema() and table_name in ('users','refresh_tokens','audit_events','auth_sessions')")) {
+            try (ResultSet result = sql.executeQuery("select count(*) from information_schema.tables where table_schema = current_schema() and table_name in ('users','refresh_tokens','audit_events','auth_sessions','email_verification_tokens','mail_outbox')")) {
                 assertThat(result.next()).isTrue();
-                assertThat(result.getInt(1)).isEqualTo(4);
+                assertThat(result.getInt(1)).isEqualTo(6);
             }
             try (ResultSet result = sql.executeQuery("select count(*) from pg_indexes where schemaname = current_schema() and indexname in ('idx_users_email','idx_refresh_user','idx_refresh_family','idx_audit_user','idx_audit_type','idx_session_user_active','idx_session_expiry')")) {
                 assertThat(result.next()).isTrue();
@@ -96,7 +96,7 @@ class FlywayMigrationTest {
             sql.executeUpdate("insert into refresh_tokens(id,user_id,token_hash,family_id) values ('" + UUID.randomUUID()
                     + "','" + UUID.randomUUID() + "','preserved-token','" + UUID.randomUUID() + "')");
         }
-        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(3);
+        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(4);
         try (Connection connection = connect(); Statement sql = connection.createStatement();
              ResultSet result = sql.executeQuery("select count(*) from refresh_tokens where token_hash='preserved-token'")) {
             assertThat(result.next()).isTrue(); assertThat(result.getInt(1)).isEqualTo(1);
@@ -131,11 +131,28 @@ class FlywayMigrationTest {
             sql.executeUpdate("insert into refresh_tokens(id,user_id,token_hash,family_id) values ('" + UUID.randomUUID()
                     + "','" + UUID.randomUUID() + "','legacy-session-cutover','" + UUID.randomUUID() + "')");
         }
-        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(1);
+        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(2);
         try (Connection connection = connect(); Statement sql = connection.createStatement();
              ResultSet result = sql.executeQuery("select revoked_at from refresh_tokens where token_hash='legacy-session-cutover'")) {
             assertThat(result.next()).isTrue();
             assertThat(result.getTimestamp(1)).isNotNull();
+        }
+    }
+
+    @Test void emailCutoverRequiresExistingUsersToVerifyAndRevokesTheirSessions() throws Exception {
+        Flyway previous = Flyway.configure().dataSource(DB.getJdbcUrl(), DB.getUsername(), DB.getPassword())
+                .locations("classpath:db/migration").schemas(schema).defaultSchema(schema).target("4").load();
+        previous.migrate(); UUID uid = UUID.randomUUID(); UUID sid = UUID.randomUUID();
+        try (Connection connection = connect(); Statement sql = connection.createStatement()) {
+            sql.executeUpdate("insert into users(id,email,password_hash,enabled,created_at) values ('" + uid + "','legacy@example.com','hash',true,current_timestamp)");
+            sql.executeUpdate("insert into auth_sessions(id,user_id,created_at,last_seen_at,expires_at) values ('" + sid + "','" + uid + "',current_timestamp,current_timestamp,current_timestamp + interval '1 day')");
+            sql.executeUpdate("insert into refresh_tokens(id,user_id,token_hash,family_id) values ('" + UUID.randomUUID() + "','" + uid + "','email-cutover','" + sid + "')");
+        }
+        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(1);
+        try (Connection connection = connect(); Statement sql = connection.createStatement();
+             ResultSet result = sql.executeQuery("select u.email_verified, s.revoked_at, t.revoked_at from users u join auth_sessions s on s.user_id=u.id join refresh_tokens t on t.user_id=u.id")) {
+            assertThat(result.next()).isTrue(); assertThat(result.getBoolean(1)).isFalse();
+            assertThat(result.getTimestamp(2)).isNotNull(); assertThat(result.getTimestamp(3)).isNotNull();
         }
     }
 

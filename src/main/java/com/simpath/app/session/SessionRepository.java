@@ -20,7 +20,7 @@ public interface SessionRepository extends JpaRepository<AuthSession, UUID> {
     @Query("""
             select s.userId as userId, u.email as email, s.lastSeenAt as lastSeenAt
             from AuthSession s, User u where s.id = :sid and s.userId = :uid
-            and u.id = s.userId and u.enabled = true and s.revokedAt is null and s.expiresAt > :now
+            and u.id = s.userId and u.enabled = true and u.emailVerified = true and s.revokedAt is null and s.expiresAt > :now
             """)
     Optional<Access> access(@Param("uid") UUID userId, @Param("sid") UUID sessionId, @Param("now") Instant now);
 

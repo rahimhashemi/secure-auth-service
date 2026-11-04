@@ -95,7 +95,7 @@ public class SessionService {
     }
 
     private void lockUser(UUID userId) {
-        if (users.lockById(userId).filter(user -> user.isEnabled()).isEmpty()) throw new InvalidSessionException();
+        if (users.lockById(userId).filter(user -> user.isEnabled() && user.isEmailVerified()).isEmpty()) throw new InvalidSessionException();
     }
 
     private String truncate(String value) { return value == null || value.length() <= 255 ? value : value.substring(0, 255); }

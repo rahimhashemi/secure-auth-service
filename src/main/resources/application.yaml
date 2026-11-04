@@ -1,4 +1,16 @@
 spring:
+  mail:
+    host: ${SMTP_HOST:localhost}
+    port: ${SMTP_PORT:1025}
+    username: ${SMTP_USERNAME:}
+    password: ${SMTP_PASSWORD:}
+    properties:
+      mail.smtp.auth: ${SMTP_AUTH:false}
+      mail.smtp.starttls.enable: ${SMTP_STARTTLS:false}
+      mail.smtp.starttls.required: ${SMTP_STARTTLS:false}
+      mail.smtp.connectiontimeout: 2000
+      mail.smtp.timeout: 2000
+      mail.smtp.writetimeout: 2000
   application:
     name: secure-auth-service
 
@@ -52,6 +64,11 @@ springdoc:
     enabled: ${APP_API_DOCS_ENABLED:true}
 
 app:
+  verification:
+    outbox-key: ${APP_MAIL_OUTBOX_KEY}
+    public-url: ${APP_VERIFICATION_PUBLIC_URL:http://localhost:8081/verify-email.html}
+    from: ${APP_MAIL_FROM:no-reply@example.invalid}
+    worker-enabled: ${APP_MAIL_WORKER_ENABLED:true}
   security:
     trusted-proxies: ${APP_TRUSTED_PROXIES:}
   token-cleanup:

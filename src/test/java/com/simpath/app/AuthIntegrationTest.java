@@ -37,6 +37,9 @@ import static org.assertj.core.api.Assertions.*;
     "app.jwt.secret=test-only-key-with-at-least-thirty-two-characters",
     "spring.datasource.username=test", "spring.datasource.password=test",
     "app.refresh-token.pepper=test-only-pepper",
+        "app.verification.outbox-key=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "app.verification.worker-enabled=false",
+        "springdoc.api-docs.enabled=false", "springdoc.swagger-ui.enabled=false",
         "app.rate-limit.account-key=test-only-account-key",
     "app.token-cleanup.enabled=true", "app.token-cleanup.cron=-",
     "app.token-cleanup.batch-size=1", "app.token-cleanup.max-batches=2", "app.rate-limit.account-limit=3",
@@ -84,7 +87,7 @@ class AuthIntegrationTest {
             connection.serverCommands().flushDb();
         }
         tokens.deleteAll(); sessions.deleteAll(); audit.deleteAll(); users.deleteAll();
-        auth.register(new RegisterRequest("rahim@example.com", "Correct-Horse-123!"));
+        registerVerified(new RegisterRequest("rahim@example.com", "Correct-Horse-123!"));
         userId = users.findByEmail("rahim@example.com").orElseThrow().getId();
     }
     AuthResponse login() { return auth.login(new LoginRequest("rahim@example.com", "Correct-Horse-123!"), "test", "127.0.0.1"); }
@@ -179,7 +182,7 @@ class AuthIntegrationTest {
     }
 
     @Test void applicationStartsAgainstFlywaySchemaWithoutHibernateCreatingTables() {
-        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("4");
+        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("5");
         assertThat(flyway.info().pending()).isEmpty();
         assertThat(jdbc.queryForObject(
                 "select count(*) from flyway_schema_history where version = '1' and success = true", Integer.class))
@@ -221,7 +224,7 @@ class AuthIntegrationTest {
         CountDownLatch start = new CountDownLatch(1);
         Callable<Boolean> registration = () -> {
             if (!start.await(10, TimeUnit.SECONDS)) throw new AssertionError("timeout");
-            auth.register(new RegisterRequest("race@example.com", "Correct-Horse-123!")); return true;
+            registerVerified(new RegisterRequest("race@example.com", "Correct-Horse-123!")); return true;
         };
         try {
             Future<Boolean> first = executor.submit(registration);
@@ -255,7 +258,7 @@ class AuthIntegrationTest {
         assertThat(tokens.findByUserId(userId)).hasSize(1).allMatch(t -> "cleanup-4".equals(t.getTokenHash()));
     }
 
-    @Test void apiDocumentationRemainsDisabledByDefault() throws Exception {
+    @Test void apiDocumentationCanBeDisabledExplicitly() throws Exception {
         mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/v3/api-docs"))
                 .andExpect(status().isNotFound());
     }
@@ -341,7 +344,7 @@ class AuthIntegrationTest {
     @Test void sessionListIsPaginatedAndCannotExposeOtherUsers() throws Exception {
         AuthResponse first = login();
         login();
-        auth.register(new RegisterRequest("other@example.com", "Correct-Horse-123!"));
+        registerVerified(new RegisterRequest("other@example.com", "Correct-Horse-123!"));
         AuthResponse outsider = auth.login(new LoginRequest("other@example.com", "Correct-Horse-123!"), "outsider", "ip");
         mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/sessions")
                 .header("Authorization", "Bearer " + first.accessToken()))
@@ -458,6 +461,12 @@ class AuthIntegrationTest {
         }
         cleanup.cleanup();
         assertThat(sessions.findAll()).extracting(com.simpath.app.session.AuthSession::getId).containsExactly(sessionId(recent));
+    }
+
+    private void registerVerified(RegisterRequest request) {
+        auth.register(request);
+        com.simpath.app.user.entity.User user = users.findByEmail(request.email().toLowerCase(java.util.Locale.ROOT)).orElseThrow();
+        user.setEmailVerified(true); users.saveAndFlush(user);
     }
 
 }

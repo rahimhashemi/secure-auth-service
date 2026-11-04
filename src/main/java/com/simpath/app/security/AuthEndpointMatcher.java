@@ -12,11 +12,17 @@ public final class AuthEndpointMatcher {
             .matcher(HttpMethod.POST, "/auth/login");
     private static final PathPatternRequestMatcher REFRESH = PathPatternRequestMatcher.withDefaults()
             .matcher(HttpMethod.POST, "/auth/refresh");
+    private static final PathPatternRequestMatcher VERIFY_REQUEST = PathPatternRequestMatcher.withDefaults()
+            .matcher(HttpMethod.POST, "/auth/email-verification/request");
+    private static final PathPatternRequestMatcher VERIFY_CONFIRM = PathPatternRequestMatcher.withDefaults()
+            .matcher(HttpMethod.POST, "/auth/email-verification/confirm");
     private AuthEndpointMatcher() { }
     public static String operation(HttpServletRequest request) {
         if (REGISTER.matches(request)) return "register";
         if (LOGIN.matches(request)) return "login";
         if (REFRESH.matches(request)) return "refresh";
+        if (VERIFY_REQUEST.matches(request)) return "verification-request";
+        if (VERIFY_CONFIRM.matches(request)) return "verification-confirm";
         return null;
     }
 }

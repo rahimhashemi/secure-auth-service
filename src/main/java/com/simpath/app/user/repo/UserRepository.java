@@ -13,6 +13,11 @@ public interface UserRepository extends JpaRepository<User, UUID> {
 
     Optional<User> findByEmail(String email);
 
+    @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+    @org.springframework.data.jpa.repository.Query("select u from User u where u.email = :email")
+    Optional<User> lockByEmail(@org.springframework.data.repository.query.Param("email") String email);
+
+
     @org.springframework.data.jpa.repository.Modifying
     @org.springframework.data.jpa.repository.Query(value = """
             INSERT INTO users(id, email, password_hash, enabled, created_at)

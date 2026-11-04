@@ -71,7 +71,8 @@ public class RateLimitService {
         if (!enabled) return 0;
         int limit = switch (operation) {
             case "login" -> loginLimit;
-            case "register" -> registerLimit;
+            case "register", "verification-request" -> registerLimit;
+            case "verification-confirm" -> refreshLimit;
             case "refresh" -> refreshLimit;
             default -> throw new IllegalArgumentException("Unsupported rate limit operation.");
         };
@@ -110,6 +111,16 @@ public class RateLimitService {
         try {
             // Saturate at the limit; additional concurrent failures never prolong the window.
             consume(accountKey(normalizedEmail), accountLimit, accountWindowMillis);
+        } catch (org.springframework.dao.DataAccessException ex) {
+            throw new com.simpath.app.common.RateLimitUnavailableException(ex);
+        }
+    }
+
+    public void enforceVerificationAccount(String email) {
+        if (!enabled) return;
+        try {
+            long retry = consume(accountKey(email) + ":verification", 3, 3600000);
+            if (retry > 0) throw new com.simpath.app.common.RateLimitExceededException(retry);
         } catch (org.springframework.dao.DataAccessException ex) {
             throw new com.simpath.app.common.RateLimitUnavailableException(ex);
         }

@@ -31,6 +31,11 @@ public class User {
     private boolean enabled = true;
 
     @Column(nullable = false)
+    private boolean emailVerified;
+
+    private Instant verificationSentAt;
+
+    @Column(nullable = false)
     private Instant createdAt = Instant.now();
 
     @PrePersist
@@ -39,3 +44,4 @@ public class User {
         if (createdAt == null) createdAt = Instant.now();
     }
 }
+

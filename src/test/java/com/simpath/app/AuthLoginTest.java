@@ -21,7 +21,7 @@ class AuthLoginTest {
     private final PasswordService passwords = mock(PasswordService.class);
     private final RateLimitService limits = mock(RateLimitService.class);
     private final AuthService auth = new AuthService(users, passwords, mock(JwtService.class),
-            mock(RefreshTokenService.class), mock(AuditService.class), limits);
+            mock(RefreshTokenService.class), mock(AuditService.class), limits, mock(com.simpath.app.verification.VerificationService.class));
     @Test void unknownUserStillPerformsPasswordComparison() {
         when(users.findByEmail("absent@example.com")).thenReturn(Optional.empty());
         assertThatThrownBy(() -> auth.login(new LoginRequest("absent@example.com", "wrong"), "test", "ip"))
