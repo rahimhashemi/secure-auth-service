@@ -7,7 +7,7 @@ services:
       POSTGRES_USER: auth
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
     ports:
-      - "127.0.0.1:5433:5433"
+      - "127.0.0.1:5433:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U auth -d authdb"]
       interval: 5s
@@ -27,12 +27,12 @@ services:
   app:
     build: .
     environment:
-      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5433/authdb
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/authdb
       SPRING_DATASOURCE_USERNAME: auth
       SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
       SPRING_DATA_REDIS_HOST: redis
       APP_TRUSTED_PROXIES: ${APP_TRUSTED_PROXIES:-}
-      APP_API_DOCS_ENABLED: ${APP_API_DOCS_ENABLED:-false}
+      APP_API_DOCS_ENABLED: ${APP_API_DOCS_ENABLED:-true}
       APP_RATE_LIMIT_REGISTER_LIMIT: ${APP_RATE_LIMIT_REGISTER_LIMIT:-5}
       APP_RATE_LIMIT_ACCOUNT_LIMIT: ${APP_RATE_LIMIT_ACCOUNT_LIMIT:-10}
       APP_RATE_LIMIT_ACCOUNT_WINDOW_SECONDS: ${APP_RATE_LIMIT_ACCOUNT_WINDOW_SECONDS:-300}

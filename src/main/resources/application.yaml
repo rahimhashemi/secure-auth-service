@@ -47,9 +47,9 @@ management:
 
 springdoc:
   api-docs:
-    enabled: ${APP_API_DOCS_ENABLED:false}
+    enabled: ${APP_API_DOCS_ENABLED:true}
   swagger-ui:
-    enabled: ${APP_API_DOCS_ENABLED:false}
+    enabled: ${APP_API_DOCS_ENABLED:true}
 
 app:
   security:
