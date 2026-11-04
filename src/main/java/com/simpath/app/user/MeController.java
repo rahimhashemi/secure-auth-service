@@ -12,10 +12,11 @@ public class MeController {
 
     @GetMapping("/me")
     public Map<String, Object> me(Authentication authentication) {
-        var principal = (AuthPrincipal) authentication.getPrincipal();
+        AuthPrincipal principal = (AuthPrincipal) authentication.getPrincipal();
         return Map.of(
                 "userId", principal.userId(),
                 "email", principal.email()
         );
     }
 }
+

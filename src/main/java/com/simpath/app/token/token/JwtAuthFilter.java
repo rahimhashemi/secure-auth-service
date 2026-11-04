@@ -20,17 +20,20 @@ import java.util.List;
 public class JwtAuthFilter extends OncePerRequestFilter {
 
     private final SecretKey key;
+    private final com.simpath.app.session.SessionService sessions;
     private final String issuer;
     private final com.simpath.app.common.ApiErrorWriter errors;
 
     public JwtAuthFilter(
             SecretKey key,
             @Value("${app.jwt.issuer}") String issuer,
-            com.simpath.app.common.ApiErrorWriter errors
+            com.simpath.app.common.ApiErrorWriter errors,
+            com.simpath.app.session.SessionService sessions
     ) {
         this.key = key;
         this.issuer = issuer;
         this.errors = errors;
+        this.sessions = sessions;
     }
 
     @Override
@@ -53,9 +56,11 @@ public class JwtAuthFilter extends OncePerRequestFilter {
                         .getBody();
 
                 String userId = claims.getSubject();
-                String email = claims.get("email", String.class);
-
-                AuthPrincipal principal = new AuthPrincipal(userId, email);
+                String sid = claims.get("sid", String.class);
+                if (userId == null || sid == null || claims.getExpiration() == null) {
+                    throw new IllegalArgumentException("Required token claim missing");
+                }
+                AuthPrincipal principal = sessions.authorize(java.util.UUID.fromString(userId), java.util.UUID.fromString(sid));
                 UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(
                         principal,
                         null,
@@ -65,10 +70,15 @@ public class JwtAuthFilter extends OncePerRequestFilter {
                 SecurityContextHolder.getContext().setAuthentication(authentication);
             }
 
-        } catch (io.jsonwebtoken.JwtException | IllegalArgumentException ex) {
-            // If token invalid, clear context and continue (will be blocked by security if needed)
+        } catch (io.jsonwebtoken.JwtException | IllegalArgumentException | com.simpath.app.session.InvalidSessionException ex) {
+            // Reject invalid claims or inactive sessions before invoking the endpoint.
             SecurityContextHolder.clearContext();
             errors.write(request, response, 401, "INVALID_TOKEN", "Invalid access token.");
+            return;
+        } catch (org.springframework.dao.DataAccessException ex) {
+            SecurityContextHolder.clearContext();
+            response.setHeader("Retry-After", "1");
+            errors.write(request, response, 503, "SESSION_STORE_UNAVAILABLE", "Authentication temporarily unavailable.");
             return;
         }
         filterChain.doFilter(request, response);

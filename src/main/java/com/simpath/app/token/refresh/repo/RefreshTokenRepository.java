@@ -29,5 +29,18 @@ public interface RefreshTokenRepository extends JpaRepository<RefreshToken, UUID
             """, nativeQuery = true)
     int deleteExpiredBatch(@org.springframework.data.repository.query.Param("cutoff") Instant cutoff,
                            @org.springframework.data.repository.query.Param("batchSize") int batchSize);
+
+    @org.springframework.data.jpa.repository.Modifying
+    @org.springframework.data.jpa.repository.Query("update RefreshToken t set t.revokedAt = :now where t.userId = :uid and t.familyId = :sid and t.revokedAt is null")
+    int revokeFamily(@org.springframework.data.repository.query.Param("uid") UUID userId,
+                     @org.springframework.data.repository.query.Param("sid") UUID sessionId,
+                     @org.springframework.data.repository.query.Param("now") Instant now);
+
+    @org.springframework.data.jpa.repository.Modifying
+    @org.springframework.data.jpa.repository.Query("update RefreshToken t set t.revokedAt = :now where t.userId = :uid and t.revokedAt is null and (:keep is null or t.familyId <> :keep)")
+    int revokeExcept(@org.springframework.data.repository.query.Param("uid") UUID userId,
+                     @org.springframework.data.repository.query.Param("keep") UUID keep,
+                     @org.springframework.data.repository.query.Param("now") Instant now);
 }
+
 

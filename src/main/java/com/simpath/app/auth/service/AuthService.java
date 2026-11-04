@@ -53,8 +53,8 @@ public class AuthService {
 
         audit.log("LOGIN_SUCCESS", u.getId(), null, ip, userAgent);
 
-        String access = jwtService.issueAccessToken(u.getId(), u.getEmail());
         RefreshTokenService.IssuedRefresh refresh = refreshTokenService.issueNew(u.getId(), userAgent, ip);
+        String access = jwtService.issueAccessToken(u.getId(), u.getEmail(), refresh.familyId());
 
         return new AuthResponse(access, jwtService.getAccessTtlSeconds(), refresh.refreshTokenPlain(), refresh.expiresInSeconds());
     }
@@ -67,7 +67,7 @@ public class AuthService {
 
             audit.log("REFRESH_SUCCESS", user.getId(), null, ip, userAgent);
 
-            String access = jwtService.issueAccessToken(user.getId(), user.getEmail());
+            String access = jwtService.issueAccessToken(user.getId(), user.getEmail(), rotated.familyId());
             return new AuthResponse(access, jwtService.getAccessTtlSeconds(), rotated.refreshTokenPlain(), rotated.expiresInSeconds());
         } catch (InvalidRefreshTokenException ex) {
             audit.log(ex.getReason() == InvalidRefreshTokenException.Reason.REUSE ? "REFRESH_REUSE" : "REFRESH_FAIL",

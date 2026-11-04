@@ -30,7 +30,7 @@ public class JwtService {
         this.accessTtlSeconds = accessTtlMinutes * 60;
     }
 
-    public String issueAccessToken(UUID userId, String email) {
+    public String issueAccessToken(UUID userId, String email, UUID sessionId) {
         Instant now = Instant.now();
         Instant exp = now.plusSeconds(accessTtlSeconds);
 
@@ -39,9 +39,10 @@ public class JwtService {
                 .setSubject(userId.toString())
                 .setIssuedAt(Date.from(now))
                 .setExpiration(Date.from(exp))
-                .addClaims(Map.of("email", email))
+                .addClaims(Map.of("email", email, "sid", sessionId.toString()))
                 .signWith(key, SignatureAlgorithm.HS256)
                 .compact();
     }
 
 }
+

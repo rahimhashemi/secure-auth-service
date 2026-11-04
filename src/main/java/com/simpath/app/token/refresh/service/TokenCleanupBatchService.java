@@ -9,13 +9,17 @@ import java.time.Instant;
 @Service
 public class TokenCleanupBatchService {
     private final RefreshTokenRepository tokens;
+    private final com.simpath.app.session.SessionRepository sessions;
 
-    public TokenCleanupBatchService(RefreshTokenRepository tokens) {
+    public TokenCleanupBatchService(RefreshTokenRepository tokens, com.simpath.app.session.SessionRepository sessions) {
         this.tokens = tokens;
+        this.sessions = sessions;
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public int deleteBatch(Instant cutoff, int batchSize) {
-        return tokens.deleteExpiredBatch(cutoff, batchSize);
+        int tokenCount = tokens.deleteExpiredBatch(cutoff, batchSize);
+        int sessionCount = sessions.deleteExpiredBatch(cutoff, batchSize);
+        return Math.max(tokenCount, sessionCount);
     }
 }

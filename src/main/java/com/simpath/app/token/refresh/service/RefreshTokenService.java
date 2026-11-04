@@ -11,7 +11,6 @@ import java.security.SecureRandom;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.Base64;
-import java.util.List;
 import java.util.UUID;
 
 @Service
@@ -20,13 +19,15 @@ public class RefreshTokenService {
     private final com.simpath.app.user.repo.UserRepository users;
     private final RefreshTokenRepository repo;
     private final RefreshTokenHasher hasher;
+    private final com.simpath.app.session.SessionService sessions;
     private final long refreshTtlDays;
     private final SecureRandom random = new SecureRandom();
 
-    public RefreshTokenService(RefreshTokenRepository repo, com.simpath.app.user.repo.UserRepository users, RefreshTokenHasher hasher, @Value("${app.jwt.refresh-ttl-days}") long refreshTtlDays) {
+    public RefreshTokenService(RefreshTokenRepository repo, com.simpath.app.user.repo.UserRepository users, RefreshTokenHasher hasher, @Value("${app.jwt.refresh-ttl-days}") long refreshTtlDays, com.simpath.app.session.SessionService sessions) {
         this.repo = repo;
         this.users = users;
         this.hasher = hasher;
+        this.sessions = sessions;
         this.refreshTtlDays = refreshTtlDays;
     }
 
@@ -41,6 +42,7 @@ public class RefreshTokenService {
     public IssuedRefresh issueNew(UUID userId, String userAgent, String ip) {
         lockUser(userId);
         UUID familyId = UUID.randomUUID();
+        sessions.create(userId, familyId, Instant.now().plus(refreshTtlDays, ChronoUnit.DAYS), userAgent, ip);
         return createAndPersist(userId, familyId, userAgent, ip);
     }
 
@@ -72,6 +74,13 @@ public class RefreshTokenService {
                     current.getFamilyId(), "Refresh token reuse detected. Session family revoked.");
         }
 
+        try {
+            sessions.renew(current.getUserId(), current.getFamilyId(), now.plus(refreshTtlDays, ChronoUnit.DAYS));
+        } catch (com.simpath.app.session.InvalidSessionException ex) {
+            throw new InvalidRefreshTokenException(InvalidRefreshTokenException.Reason.INVALID,
+                    current.getUserId(), current.getFamilyId(), "Session is inactive.");
+        }
+
         // Revoke current & rotate
         current.setRevokedAt(now);
 
@@ -88,13 +97,7 @@ public class RefreshTokenService {
      */
     @Transactional
     public void revokeFamily(UUID userId, UUID familyId) {
-        Instant now = Instant.now();
-        lockUser(userId);
-        List<RefreshToken> tokens = repo.findByUserIdAndFamilyId(userId, familyId);
-        for (RefreshToken t : tokens) {
-            if (t.getRevokedAt() == null) t.setRevokedAt(now);
-        }
-        repo.saveAll(tokens);
+        sessions.revoke(userId, familyId);
     }
 
     /**
@@ -102,13 +105,7 @@ public class RefreshTokenService {
      */
     @Transactional
     public void revokeAll(UUID userId) {
-        Instant now = Instant.now();
-        lockUser(userId);
-        List<RefreshToken> tokens = repo.findByUserId(userId);
-        for (RefreshToken t : tokens) {
-            if (t.getRevokedAt() == null) t.setRevokedAt(now);
-        }
-        repo.saveAll(tokens);
+        sessions.revokeAll(userId);
     }
 
     @Transactional
@@ -116,15 +113,11 @@ public class RefreshTokenService {
         String hash = hasher.hash(refreshTokenPlain);
 
         lockOwner(hash);
-        Instant now = Instant.now();
         RefreshToken current = repo.findByTokenHash(hash).orElseThrow(() ->
                 new InvalidRefreshTokenException("Invalid refresh token.")
         );
 
-        if (current.getRevokedAt() == null) {
-            current.setRevokedAt(now);
-            repo.save(current);
-        }
+        sessions.revoke(current.getUserId(), current.getFamilyId());
     }
 
 
@@ -165,6 +158,11 @@ public class RefreshTokenService {
         if (token.getRevokedAt() != null || token.getReplacedBy() != null
                 || token.getExpiresAt() == null || !token.getExpiresAt().isAfter(Instant.now())) {
             throw new InvalidRefreshTokenException("Invalid refresh token.");
+        }
+        try {
+            sessions.authorize(token.getUserId(), token.getFamilyId());
+        } catch (com.simpath.app.session.InvalidSessionException ex) {
+            throw new InvalidRefreshTokenException("Session is inactive.");
         }
         return token.getUserId();
     }

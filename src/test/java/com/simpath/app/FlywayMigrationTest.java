@@ -36,15 +36,15 @@ class FlywayMigrationTest {
     }
 
     @Test void emptyDatabaseGetsAllTablesAndIndexes() throws Exception {
-        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(3);
+        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(4);
         try (Connection connection = connect(); Statement sql = connection.createStatement()) {
-            try (ResultSet result = sql.executeQuery("select count(*) from information_schema.tables where table_schema = current_schema() and table_name in ('users','refresh_tokens','audit_events')")) {
+            try (ResultSet result = sql.executeQuery("select count(*) from information_schema.tables where table_schema = current_schema() and table_name in ('users','refresh_tokens','audit_events','auth_sessions')")) {
                 assertThat(result.next()).isTrue();
-                assertThat(result.getInt(1)).isEqualTo(3);
+                assertThat(result.getInt(1)).isEqualTo(4);
             }
-            try (ResultSet result = sql.executeQuery("select count(*) from pg_indexes where schemaname = current_schema() and indexname in ('idx_users_email','idx_refresh_user','idx_refresh_family','idx_audit_user','idx_audit_type')")) {
+            try (ResultSet result = sql.executeQuery("select count(*) from pg_indexes where schemaname = current_schema() and indexname in ('idx_users_email','idx_refresh_user','idx_refresh_family','idx_audit_user','idx_audit_type','idx_session_user_active','idx_session_expiry')")) {
                 assertThat(result.next()).isTrue();
-                assertThat(result.getInt(1)).isEqualTo(5);
+                assertThat(result.getInt(1)).isEqualTo(7);
             }
         }
         assertThat(flyway.validateWithResult().validationSuccessful).isTrue();
@@ -96,7 +96,7 @@ class FlywayMigrationTest {
             sql.executeUpdate("insert into refresh_tokens(id,user_id,token_hash,family_id) values ('" + UUID.randomUUID()
                     + "','" + UUID.randomUUID() + "','preserved-token','" + UUID.randomUUID() + "')");
         }
-        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(2);
+        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(3);
         try (Connection connection = connect(); Statement sql = connection.createStatement();
              ResultSet result = sql.executeQuery("select count(*) from refresh_tokens where token_hash='preserved-token'")) {
             assertThat(result.next()).isTrue(); assertThat(result.getInt(1)).isEqualTo(1);
@@ -123,6 +123,22 @@ class FlywayMigrationTest {
             assertThat(result.getString(1)).isEqualTo("LEGACY@example.com");
         }
     }
+    @Test void sessionCutoverRevokesLegacyRefreshTokensWithoutDeletingHistory() throws Exception {
+        Flyway previous = Flyway.configure().dataSource(DB.getJdbcUrl(), DB.getUsername(), DB.getPassword())
+                .locations("classpath:db/migration").schemas(schema).defaultSchema(schema).target("3").load();
+        previous.migrate();
+        try (Connection connection = connect(); Statement sql = connection.createStatement()) {
+            sql.executeUpdate("insert into refresh_tokens(id,user_id,token_hash,family_id) values ('" + UUID.randomUUID()
+                    + "','" + UUID.randomUUID() + "','legacy-session-cutover','" + UUID.randomUUID() + "')");
+        }
+        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(1);
+        try (Connection connection = connect(); Statement sql = connection.createStatement();
+             ResultSet result = sql.executeQuery("select revoked_at from refresh_tokens where token_hash='legacy-session-cutover'")) {
+            assertThat(result.next()).isTrue();
+            assertThat(result.getTimestamp(1)).isNotNull();
+        }
+    }
+
 }
 
 

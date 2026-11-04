@@ -6,7 +6,7 @@ Rotation checks expiry before revoked/replaced state. Expired history always ret
 401 without revoking another token. Unexpired reuse revokes only the matching family
 under the existing pessimistic user lock; revocation commits on the typed exception.
 The audit retains userId, familyId and reason. Logout-all still explicitly revokes all
-refresh families. Access JWTs remain valid until their configured expiry.
+refresh families. Access JWTs require an active matching session and enabled user on every request.
 
 A retry grace period is deliberately omitted: replaying an opaque refresh token
 cannot distinguish its owner from a thief. The service does not persist plaintext
