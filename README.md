@@ -31,6 +31,7 @@ export POSTGRES_PASSWORD="$(openssl rand -hex 24)"
 export APP_JWT_SECRET="$(openssl rand -hex 32)"
 export APP_REFRESH_PEPPER="$(openssl rand -hex 32)"
 export APP_RATE_LIMIT_ACCOUNT_KEY="$(openssl rand -hex 32)"
+export APP_MAIL_OUTBOX_KEY="$(openssl rand -hex 32)"
 docker compose up --build
 ```
 
@@ -39,7 +40,7 @@ PostgreSQL and Redis ports are bound to localhost. Redis is required for login
 and refresh rate limiting and Compose waits for its health check.
 
 - API: http://localhost:8081
-- Swagger (opt-in with `APP_API_DOCS_ENABLED=true`): http://localhost:8081/swagger-ui.html
+- Swagger (disable with `APP_API_DOCS_ENABLED=false`): http://localhost:8081/swagger-ui.html
 - Health: http://localhost:8081/actuator/health
 
 JWT secret and refresh pepper are required configuration. The JWT secret must have
@@ -96,7 +97,7 @@ operation and can remain if the surrounding transaction subsequently fails.
 By default each socket peer IP gets separate budgets of **10 login attempts** and
 **30 refresh attempts** in a **60-second fixed window**, starting at the first request.
 All POST attempts count, including successful, invalid, and malformed requests.
-Registration has a separate default limit of 5 requests per IP/window. Other endpoints are not covered. Redis executes the check, increment, and expiry
+Registration has a separate default limit of 5 requests per IP/window. Verification request/confirmation endpoints have separate IP budgets too. Redis executes the check, increment, and expiry
 atomically so multiple application instances share the same budget. Redis keys use
 SHA-256 of the address and never include passwords, email addresses, or tokens.
 An address hash is pseudonymous, not anonymous.
@@ -129,7 +130,7 @@ implemented. Do not enable arbitrary forwarded-header trust on an internet-facin
 
 ## Database migrations
 
-On an empty database, Flyway creates the three auth tables from the versioned SQL
+On an empty database, Flyway creates the auth tables from the versioned SQL
 under `src/main/resources/db/migration`; Hibernate then validates the schema instead
 of changing it. Applied migration checksums are checked on startup. Automatic baseline
 and Flyway clean are disabled.
@@ -169,9 +170,9 @@ suite runs with Flyway and production Hibernate validation, without `create-drop
 
 ## Remaining limitations
 
-- No MFA, email verification, password reset, or OAuth2/OIDC support.
+- No MFA, password reset, or OAuth2/OIDC support.
 - Existing Hibernate databases require verified, manual Flyway adoption; separate migration/runtime DB roles are not configured.
-- No immediate access-token revocation. Expired refresh history is cleaned in bounded batches after a retention period.
+- Access tokens are checked against PostgreSQL sessions on every authenticated request. Expired history is cleaned in bounded batches.
 - Database locks serialize session operations per user, with no custom lock timeout policy.
 - Registration normalization/concurrency behavior and broader HTTP endpoint coverage need work.
 - Deployment hardening, TLS, browser credential storage and CSRF policy require a deployment-specific review.
@@ -193,3 +194,29 @@ Unknown or another user's session id returns the same 204 without changing that 
 new version afterwards. V4 revokes legacy refresh tokens; JWTs without `sid` are
 rejected. All existing users must sign in again. Do not run old and new versions
 concurrently or roll back the binary: old binaries do not enforce session revocation.
+
+## Email verification
+
+Registration now creates an unverified account. Open [Mailpit](http://localhost:8025),
+follow the email link and press **Confirm email**, then log in. Compose starts the
+local SMTP sink; no external recipient is contacted by Mailpit. The application is
+on port 8081; PostgreSQL is exposed on host 5433 and listens on container 5432.
+
+Set a new independent `APP_MAIL_OUTBOX_KEY` (64 random hex characters) in `.env`:
+
+```bash
+openssl rand -hex 32
+```
+
+Keep this key stable across restarts and instances. Do not regenerate your other
+secrets or overwrite an existing `.env`. Then run `docker compose up --build -d`.
+`POST /auth/email-verification/request` accepts `{"email":"test@example.com"}` and
+returns a generic 202. `POST /auth/email-verification/confirm` accepts `{"token":"..."}`
+and returns 204 on success. Tokens expire after 30 minutes and can be used once.
+
+**V5 cutover:** all existing users must verify; existing sessions and refresh tokens
+are revoked. Stop old instances before migration and run only the new version.
+Existing users request a verification email; the migration sends no email blast.
+Configure production SMTP and an HTTPS `APP_VERIFICATION_PUBLIC_URL` before enabling
+registration. Mailpit is a local inbox for testing, not a production mail provider.
+See [verification architecture and operations](docs/email-verification.md).

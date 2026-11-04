@@ -26,6 +26,8 @@ import static org.assertj.core.api.Assertions.*;
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
         "app.jwt.secret=test-only-key-with-at-least-thirty-two-characters",
         "app.refresh-token.pepper=test-only-pepper",
+        "app.verification.outbox-key=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "app.verification.worker-enabled=false",
         "app.rate-limit.account-key=test-only-account-key",
         "spring.datasource.username=test", "spring.datasource.password=test",
         "app.rate-limit.login-limit=3", "app.rate-limit.register-limit=3", "app.rate-limit.refresh-limit=3",
@@ -38,6 +40,7 @@ class PlatformHttpIntegrationTest {
     @Autowired Environment environment;
     @Autowired JsonMapper json;
     @Autowired AuthService auth;
+    @Autowired com.simpath.app.user.repo.UserRepository users;
     @Autowired org.springframework.data.redis.core.StringRedisTemplate redis;
     @BeforeEach void clearRateLimits() {
         try (org.springframework.data.redis.connection.RedisConnection connection = redis.getConnectionFactory().getConnection()) {
@@ -79,7 +82,7 @@ class PlatformHttpIntegrationTest {
     @Test void loginProtectedEndpointRefreshAndLogoutPreserveTheirHttpContract() throws Exception {
         String email = "platform-http@example.com";
         String password = "Correct-Horse-123!";
-        auth.register(new RegisterRequest(email, password));
+        registerVerified(new RegisterRequest(email, password));
         HttpResponse<String> login = post("/auth/login", Map.of("email", email, "password", password));
         assertThat(login.statusCode()).isEqualTo(200);
         JsonNode session = json.readTree(login.body());
@@ -133,7 +136,7 @@ class PlatformHttpIntegrationTest {
     @Test void encodedLoginIgnoresStaleBearerLikeCanonicalLogin() throws Exception {
         String email = "encoded-login@example.com";
         String password = "Correct-Horse-123!";
-        auth.register(new RegisterRequest(email, password));
+        registerVerified(new RegisterRequest(email, password));
         HttpResponse<String> response = client.send(HttpRequest.newBuilder(url("/auth/log%69n"))
                 .timeout(Duration.ofSeconds(10)).header("Content-Type", "application/json")
                 .header("Authorization", "Bearer stale")
@@ -165,5 +168,11 @@ class PlatformHttpIntegrationTest {
         assertThat(error.path("path").asText()).isEqualTo("/me");
         assertThat(Instant.parse(error.path("timestamp").asText())).isNotNull();
     }
+    private void registerVerified(RegisterRequest request) {
+        auth.register(request);
+        com.simpath.app.user.entity.User user = users.findByEmail(request.email().toLowerCase(java.util.Locale.ROOT)).orElseThrow();
+        user.setEmailVerified(true); users.saveAndFlush(user);
+    }
+
 }
 

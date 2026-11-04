@@ -24,6 +24,11 @@ services:
     ports:
       - "127.0.0.1:6379:6379"
 
+  mailpit:
+    image: axllent/mailpit:v1.20
+    ports:
+      - "127.0.0.1:8025:8025"
+
   app:
     build: .
     environment:
@@ -41,6 +46,15 @@ services:
       APP_RATE_LIMIT_LOGIN_LIMIT: ${APP_RATE_LIMIT_LOGIN_LIMIT:-10}
       APP_RATE_LIMIT_REFRESH_LIMIT: ${APP_RATE_LIMIT_REFRESH_LIMIT:-30}
       APP_RATE_LIMIT_WINDOW_SECONDS: ${APP_RATE_LIMIT_WINDOW_SECONDS:-60}
+      SMTP_HOST: ${SMTP_HOST:-mailpit}
+      SMTP_PORT: ${SMTP_PORT:-1025}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_AUTH: ${SMTP_AUTH:-false}
+      SMTP_STARTTLS: ${SMTP_STARTTLS:-false}
+      APP_MAIL_OUTBOX_KEY: ${APP_MAIL_OUTBOX_KEY:?Set APP_MAIL_OUTBOX_KEY}
+      APP_VERIFICATION_PUBLIC_URL: ${APP_VERIFICATION_PUBLIC_URL:-http://localhost:8081/verify-email.html}
+      APP_MAIL_FROM: ${APP_MAIL_FROM:-no-reply@example.invalid}
       APP_JWT_SECRET: ${APP_JWT_SECRET:?Set APP_JWT_SECRET}
       APP_REFRESH_PEPPER: ${APP_REFRESH_PEPPER:?Set APP_REFRESH_PEPPER}
 

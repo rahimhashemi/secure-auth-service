@@ -15,14 +15,16 @@ import org.springframework.transaction.annotation.Transactional;
 public class AuthService {
 
     private final UserRepository users;
+    private final com.simpath.app.verification.VerificationService verification;
     private final PasswordService passwordService;
     private final JwtService jwtService;
     private final RefreshTokenService refreshTokenService;
     private final AuditService audit;
     private final com.simpath.app.security.RateLimitService rateLimits;
 
-    public AuthService(UserRepository users, PasswordService passwordService, JwtService jwtService, RefreshTokenService refreshTokenService, AuditService audit, com.simpath.app.security.RateLimitService rateLimits) {
+    public AuthService(UserRepository users, PasswordService passwordService, JwtService jwtService, RefreshTokenService refreshTokenService, AuditService audit, com.simpath.app.security.RateLimitService rateLimits, com.simpath.app.verification.VerificationService verification) {
         this.users = users;
+        this.verification = verification;
         this.passwordService = passwordService;
         this.jwtService = jwtService;
         this.refreshTokenService = refreshTokenService;
@@ -35,7 +37,8 @@ public class AuthService {
         String email = com.simpath.app.security.EmailNormalizer.normalize(req.email());
         String passwordHash = passwordService.hash(req.password());
         // Hash in both cases; atomically suppress only the duplicate email conflict.
-        users.insertIfAbsent(java.util.UUID.randomUUID(), email, passwordHash, java.time.Instant.now());
+        java.util.UUID id = java.util.UUID.randomUUID();
+        if (users.insertIfAbsent(id, email, passwordHash, java.time.Instant.now()) == 1) verification.issueNewAccount(id);
     }
 
     @Transactional
@@ -45,7 +48,7 @@ public class AuthService {
         User u = users.findByEmail(email).orElse(null);
 
         boolean passwordMatches = passwordService.matches(req.password(), u == null ? null : u.getPasswordHash());
-        if (u == null || !u.isEnabled() || !passwordMatches) {
+        if (u == null || !u.isEnabled() || !u.isEmailVerified() || !passwordMatches) {
             rateLimits.recordFailedLogin(email);
             audit.log("LOGIN_FAIL", u != null ? u.getId() : null, "invalid_credentials", ip, userAgent);
             throw new com.simpath.app.common.InvalidCredentialsException();
