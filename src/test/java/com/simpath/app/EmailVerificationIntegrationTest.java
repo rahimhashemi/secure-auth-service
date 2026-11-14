@@ -58,6 +58,8 @@ class EmailVerificationIntegrationTest {
         }
     }
     @Autowired AuthService auth;
+    @Autowired com.simpath.app.passwordreset.PasswordResetService reset;
+    @Autowired com.simpath.app.passwordreset.PasswordResetRepository resetTokens;
     @Autowired VerificationService verification;
     @Autowired UserRepository users;
     @Autowired VerificationRepository tokens;
@@ -245,4 +247,94 @@ class EmailVerificationIntegrationTest {
         } finally { start.countDown(); pool.shutdownNow(); }
     }
 
+
+    @Test void resetRequestReturnsSameResponseForUnknownAndUnverifiedAccounts() throws Exception {
+        register();
+        String known = mvc.perform(post("/auth/password-reset/request").contentType(MediaType.APPLICATION_JSON)
+                .content("{\"email\":\"" + email + "\"}"))
+                .andExpect(status().isAccepted()).andReturn().getResponse().getContentAsString();
+        mvc.perform(post("/auth/password-reset/request").contentType(MediaType.APPLICATION_JSON)
+                .content("{\"email\":\"unknown@example.com\"}"))
+                .andExpect(status().isAccepted()).andExpect(content().string(known));
+        assertThat(resetTokens.count()).isZero();
+    }
+
+    @Test void passwordResetRevokesSessionsAndSiblingLinksAndSendsNotice() throws Exception {
+        register();
+        verification.confirm(token());
+        delivery.scrub();
+        AuthResponse oldSession = auth.login(new LoginRequest(email, password), "test", "ip");
+        String sibling = requestReset();
+        assertThat(delivery.deliverOne()).isTrue();
+        verify(mail).sendPasswordReset(email, sibling);
+        String resetToken = requestReset();
+        String newPassword = "Another-Correct-Horse-123!";
+
+        mvc.perform(post("/auth/password-reset/confirm").contentType(MediaType.APPLICATION_JSON)
+                .content("{\"token\":\"" + resetToken + "\",\"newPassword\":\"short\"}"))
+                .andExpect(status().isBadRequest());
+        mvc.perform(post("/auth/password-reset/confirm").contentType(MediaType.APPLICATION_JSON)
+                .content("{\"token\":\"" + resetToken + "\",\"newPassword\":\"" + newPassword + "\"}"))
+                .andExpect(status().isNoContent());
+        mvc.perform(get("/me").header("Authorization", "Bearer " + oldSession.accessToken()))
+                .andExpect(status().isUnauthorized());
+        mvc.perform(post("/auth/refresh").contentType(MediaType.APPLICATION_JSON)
+                .content("{\"refreshToken\":\"" + oldSession.refreshToken() + "\"}"))
+                .andExpect(status().isUnauthorized());
+        assertThatThrownBy(() -> reset.confirm(sibling, password))
+                .isInstanceOf(com.simpath.app.passwordreset.InvalidPasswordResetException.class);
+        assertThatThrownBy(() -> reset.confirm(resetToken, password))
+                .isInstanceOf(com.simpath.app.passwordreset.InvalidPasswordResetException.class);
+        assertThatThrownBy(() -> auth.login(new LoginRequest(email, password), "test", "ip"))
+                .isInstanceOf(com.simpath.app.common.InvalidCredentialsException.class);
+        assertThat(auth.login(new LoginRequest(email, newPassword), "test", "ip").accessToken()).isNotBlank();
+        delivery.scrub();
+        assertThat(delivery.deliverOne()).isTrue();
+        verify(mail).sendPasswordChanged(email);
+    }
+
+    @Test void expiredResetCannotChangePassword() {
+        register();
+        verification.confirm(token());
+        String plain = requestReset();
+        com.simpath.app.passwordreset.PasswordResetToken row = resetTokens.findAll().get(0);
+        row.setExpiresAt(Instant.now().minusSeconds(1));
+        resetTokens.saveAndFlush(row);
+        assertThatThrownBy(() -> reset.confirm(plain, "Another-Correct-Horse-123!"))
+                .isInstanceOf(com.simpath.app.passwordreset.InvalidPasswordResetException.class);
+        assertThat(auth.login(new LoginRequest(email, password), "test", "ip").accessToken()).isNotBlank();
+    }
+
+    @Test void concurrentResetConsumesTokenOnce() throws Exception {
+        register();
+        verification.confirm(token());
+        String plain = requestReset();
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        CountDownLatch start = new CountDownLatch(1);
+        Callable<Boolean> consume = () -> {
+            if (!start.await(10, TimeUnit.SECONDS)) throw new AssertionError("timeout");
+            try {
+                reset.confirm(plain, "Another-Correct-Horse-123!");
+                return true;
+            } catch (com.simpath.app.passwordreset.InvalidPasswordResetException expected) {
+                return false;
+            }
+        };
+        try {
+            Future<Boolean> first = pool.submit(consume);
+            Future<Boolean> second = pool.submit(consume);
+            start.countDown();
+            assertThat(first.get(20, TimeUnit.SECONDS) ^ second.get(20, TimeUnit.SECONDS)).isTrue();
+        } finally {
+            pool.shutdownNow();
+        }
+    }
+
+    private String requestReset() {
+        reset.request(email);
+        MailOutbox item = outbox.findAll().stream()
+                .filter(row -> row.getResetTokenId() != null && row.getPayload() != null)
+                .findFirst().orElseThrow();
+        return cipher.decrypt(item.getId(), item.getPayload()).split("\n", 2)[1];
+    }
 }

@@ -14,6 +14,11 @@ public interface UserRepository extends JpaRepository<User, UUID> {
     Optional<User> findByEmail(String email);
 
     @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+    @org.springframework.data.jpa.repository.Query("select u from User u where u.id = :id and u.passwordHash = :hash and u.enabled = true and u.emailVerified = true")
+    Optional<User> lockForLogin(@org.springframework.data.repository.query.Param("id") UUID id,
+                                @org.springframework.data.repository.query.Param("hash") String hash);
+
+    @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
     @org.springframework.data.jpa.repository.Query("select u from User u where u.email = :email")
     Optional<User> lockByEmail(@org.springframework.data.repository.query.Param("email") String email);
 

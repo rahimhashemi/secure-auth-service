@@ -220,3 +220,14 @@ Existing users request a verification email; the migration sends no email blast.
 Configure production SMTP and an HTTPS `APP_VERIFICATION_PUBLIC_URL` before enabling
 registration. Mailpit is a local inbox for testing, not a production mail provider.
 See [verification architecture and operations](docs/email-verification.md).
+
+### Password reset
+
+Send `POST /auth/password-reset/request` with an `email` field. Eligible accounts
+receive a 15-minute link via the same encrypted outbox used for verification.
+For local Compose, open Mailpit at http://localhost:8025 to find the link.
+The reset page is a sibling of the configured verification page.
+
+The page sends `POST /auth/password-reset/confirm` with `token` and `newPassword`.
+A successful reset returns 204, revokes existing sessions and outstanding reset
+links, and queues a confirmation email. Sign in again with the new password.

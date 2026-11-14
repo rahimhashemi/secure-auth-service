@@ -18,20 +18,42 @@ public class MailOutboxDelivery {
         MailOutbox item = outbox.claim(Instant.now()).orElse(null);
         if (item == null) return false;
         if (item.getPayload() == null || item.getAttempts() >= 5 || !item.getExpiresAt().isAfter(Instant.now())
-                || !tokens.deliverable(item.getTokenId(), Instant.now())) { item.finish(); return true; }
+                || !deliverable(item)) { item.finish(); return true; }
         item.setAttempts(item.getAttempts() + 1);
         try {
-            String[] payload = cipher.decrypt(item.getId(), item.getPayload()).split("\n", 2);
-            if (payload.length != 2) throw new IllegalStateException("Invalid mail payload");
-            mail.send(payload[0], payload[1]); item.finish();
+            String payload = cipher.decrypt(item.getId(), item.getPayload());
+            send(item, payload);
+            item.finish();
         } catch (RuntimeException ex) {
             // SMTP exceptions can contain addresses or message content: never log them.
-            LOG.warn("Verification delivery failed outbox={} attempt={}", item.getId(), item.getAttempts());
+            LOG.warn("Mail delivery failed outbox={} attempt={}", item.getId(), item.getAttempts());
             if (item.getAttempts() >= 5) item.finish();
             else item.setNextAttemptAt(Instant.now().plusSeconds(30L << (item.getAttempts() - 1)));
         }
         return true;
     }
+    private boolean deliverable(MailOutbox item) {
+        Instant now = Instant.now();
+        if (item.getTokenId() != null) {
+            return tokens.deliverable(item.getTokenId(), now);
+        }
+        return outbox.resetDeliverable(item.getResetTokenId(), item.isResetNotice(), now);
+    }
+
+    private void send(MailOutbox item, String payload) {
+        if (item.isResetNotice()) {
+            mail.sendPasswordChanged(payload);
+            return;
+        }
+        String[] fields = payload.split("\n", 2);
+        if (fields.length != 2) throw new IllegalStateException("Invalid mail payload");
+        if (item.getResetTokenId() != null) {
+            mail.sendPasswordReset(fields[0], fields[1]);
+        } else {
+            mail.send(fields[0], fields[1]);
+        }
+    }
+
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void scrub() { outbox.scrubInactive(Instant.now()); }
 }

@@ -22,6 +22,12 @@ public class GlobalExceptionHandler extends org.springframework.web.servlet.mvc.
         return ResponseEntity.badRequest().body(ApiError.of("INVALID_VERIFICATION_TOKEN", "Invalid or expired verification token.", req.getRequestURI()));
     }
 
+    @ExceptionHandler(com.simpath.app.passwordreset.InvalidPasswordResetException.class)
+    public ResponseEntity<ApiError> invalidPasswordReset(HttpServletRequest req) {
+        return ResponseEntity.badRequest().body(ApiError.of("INVALID_PASSWORD_RESET_TOKEN",
+                "Invalid or expired password reset token.", req.getRequestURI()));
+    }
+
     @ExceptionHandler(InvalidCredentialsException.class)
     public ResponseEntity<ApiError> credentials(InvalidCredentialsException ex, HttpServletRequest req) {
         return ResponseEntity.status(401).body(ApiError.of("INVALID_CREDENTIALS", "Invalid credentials.", req.getRequestURI()));
