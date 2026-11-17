@@ -4,6 +4,8 @@ A security-focused authentication service built with Java 17 and Spring Boot 4, 
 
 A hands-on portfolio project illustrating secure authentication patterns with PostgreSQL-backed sessions. **Not a production-ready identity provider.**
 
+[![Java CI with Maven](https://github.com/rahimhashemi/secure-auth-service/actions/workflows/maven.yml/badge.svg?branch=master)](https://github.com/rahimhashemi/secure-auth-service/actions/workflows/maven.yml)
+
 ## Implemented
 
 - BCrypt password hashing and signed, short-lived JWT access tokens.
@@ -17,10 +19,166 @@ A hands-on portfolio project illustrating secure authentication patterns with Po
 - Swagger UI and a protected `/me` endpoint.
 - Shared Redis rate limits for login and refresh, with HTTP 429 and Retry-After.
 - Versioned PostgreSQL migrations with Flyway and Hibernate schema validation.
+- Active session checks, session listing, selective revocation, and logout of other devices.
+- Hashed one-time email verification links with an AES-GCM-encrypted mail outbox and retry worker.
 
 Latest routing/security corrections: [routing and audit repair](docs/auth-routing-and-audit.md).
 
 Platform dependencies and migration notes: [Spring Boot upgrade](docs/spring-boot-upgrade.md).
+
+## Technology stack
+
+| Concern | Implementation |
+| --- | --- |
+| Application | Java 17, Spring Boot 4.1.2, Spring MVC, Spring Security |
+| Authentication | BCrypt, signed HS256 JWT access tokens (JJWT), opaque refresh tokens |
+| State and persistence | PostgreSQL, Spring Data JPA, database transactions and row locks |
+| Abuse prevention | Redis, atomic Lua-script rate limits |
+| Schema management | Flyway migrations, Hibernate schema validation |
+| Email verification | Spring Mail, encrypted transactional outbox, Mailpit for local testing |
+| Testing and delivery | JUnit, Spring Boot Test, Testcontainers, Maven, Docker Compose, GitHub Actions |
+
+## Architecture
+
+**A package-oriented modular monolith**, running as a single Spring Boot application. Controllers handle HTTP contracts; services coordinate authentication and session changes; repositories persist users, sessions, refresh tokens, audit events, and verification mail. Redis is used for shared rate limiting, **not** as the authoritative session store.
+
+```mermaid
+flowchart TB
+    client["Browser / API client"] --> rate["RateLimitFilter"]
+    rate --> jwtFilter["JwtAuthFilter"]
+    jwtFilter --> endpoints["Auth, verification, session and /me controllers"]
+
+    rate --> redis[("Redis: atomic rate limits")]
+    jwtFilter --> sessions["SessionService: live session validation"]
+
+    endpoints --> auth["AuthService"]
+    endpoints --> verify["VerificationService"]
+    endpoints --> sessions
+    auth --> password["PasswordService"]
+    auth --> refresh["RefreshTokenService"]
+    auth --> jwt["JwtService"]
+    auth --> audit["AuditService"]
+    auth --> verify
+    refresh --> sessions
+
+    auth --> postgres[("PostgreSQL")]
+    refresh --> postgres
+    sessions --> postgres
+    verify --> postgres
+    audit --> postgres
+
+    verify --> outbox["Encrypted mail outbox"]
+    outbox --> worker["MailOutboxWorker"]
+    worker --> smtp["SMTP / Mailpit locally"]
+```
+
+The filters run in sequence; `JwtAuthFilter` skips matched public authentication operations. For requests carrying a Bearer token, the filter verifies the JWT and then checks its `sid` against an active, non-revoked PostgreSQL session and enabled, verified user. This enables revocation on the **next** authenticated request, at the cost of a database lookup per such request. See [session management](docs/session-management.md).
+
+## Authentication flows
+
+### Registration and email verification
+
+`POST /auth/register` normalizes the email, applies the password policy, stores a BCrypt hash, and creates an **unverified** user. A one-time verification token (stored only as a hash) and an AES-GCM-encrypted outbox payload are persisted transactionally. A worker sends the email; `POST /auth/email-verification/confirm` consumes the token and verifies the account. Unverified accounts cannot log in. See [email verification](docs/email-verification.md).
+
+### Password login and token issuance
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Client
+    participant Filter as RateLimitFilter
+    participant Auth as AuthService
+    participant Redis
+    participant DB as PostgreSQL
+    participant Token as RefreshTokenService
+    participant JWT as JwtService
+
+    Client->>Filter: POST /auth/login
+    Filter->>Redis: Atomically consume IP budget
+    Filter->>Auth: Forward request
+    Auth->>Redis: Check account failure budget
+    Auth->>DB: Load normalized-email user
+    Note over Auth: BCrypt verification + enabled and email-verified checks
+    alt Invalid credentials
+        Auth->>Redis: Record failed login
+        Auth-->>Client: 401 (generic credentials error)
+    else Valid credentials
+        Auth->>Token: Issue new refresh-token family
+        Token->>DB: Lock user; store session and token hash
+        Token-->>Auth: Opaque refresh token + family ID
+        Auth->>JWT: Sign access JWT with sid = family ID
+        Auth-->>Client: Access token + refresh token
+    end
+```
+
+Access JWTs expire after **15 minutes** by default; refresh tokens expire after **14 days**. A successful refresh renews the session lifetime; there is currently **no absolute session lifetime**.
+
+### Refresh rotation and reuse detection
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Client
+    participant Auth as AuthService
+    participant Token as RefreshTokenService
+    participant DB as PostgreSQL
+    participant JWT as JwtService
+
+    Client->>Auth: POST /auth/refresh (opaque token)
+    Auth->>Token: Rotate refresh token
+    Token->>DB: Hash lookup, identify owner, lock user
+    Token->>DB: Read token and session state
+    alt Active, unexpired token and session
+        Token->>DB: Revoke previous token, save successor, renew session
+        Token-->>Auth: Successor + same session family ID
+        Auth->>JWT: Sign JWT with sid = family ID
+        Auth-->>Client: New access and refresh tokens
+    else Unexpired token already revoked or replaced
+        Token->>DB: Revoke entire affected session family
+        Note over Token,DB: Revocation commits despite 401 response
+        Auth-->>Client: 401 reuse detected
+    else Unknown, expired, or otherwise invalid token
+        Auth-->>Client: Invalid refresh response
+    end
+```
+
+**Client integration requirement:** serialize refresh requests per session (single-flight). Concurrent requests using the *same* refresh token can be interpreted as reuse and revoke their shared session family. Unknown tokens cannot be mapped to a family; expired token history does not revoke a live session. Other device sessions are unaffected by reuse of one family's token. See [session policy](docs/session-policy.md).
+
+## Project structure
+
+```text
+src/main/java/com/simpath/app/
+├── auth/               # Registration, login, refresh and logout APIs
+├── security/           # Password policy, address resolution, Redis rate limits
+├── token/
+│   ├── token/          # JWT creation, validation filter and principal
+│   └── refresh/        # Opaque token hashing, rotation and cleanup
+├── session/            # PostgreSQL-backed session listing and revocation
+├── verification/       # Email tokens, encrypted outbox, SMTP worker
+├── audit/              # Security audit events
+├── user/               # User persistence and /me
+├── config/             # Spring Security, JWT and OpenAPI configuration
+└── common/             # API errors and exception handling
+
+src/main/resources/db/migration/    # Versioned Flyway SQL (V1–V5)
+src/main/resources/static/          # Email verification page
+src/test/java/com/simpath/app/      # Unit, HTTP and Testcontainers tests
+docs/                               # Operational and security design notes
+.github/workflows/maven.yml         # Java 17/21 Maven verification
+```
+
+## Tests and CI
+
+[GitHub Actions – Java CI with Maven](https://github.com/rahimhashemi/secure-auth-service/actions/workflows/maven.yml) runs `mvn -B verify` on **Java 17 and 21** for pull requests and pushes to `master`. Integration tests use real PostgreSQL and Redis via Testcontainers, so Docker must be available. The suite exercises refresh rotation and concurrent reuse, session revocation, rate-limit atomicity, HTTP security filters, email verification/outbox behavior, and Flyway migration safety.
+
+The workflow also includes a **separate dependency-graph submission job** on `master`; if GitHub's Dependency Graph is disabled in repository settings, that job may fail even when both Java build/test jobs pass. Inspect the individual job results instead of interpreting the overall badge as a test-only status. Commands and detailed test coverage are in [Tests](#tests).
+
+## Technical documentation
+
+- [Session management and revocation](docs/session-management.md) · [Session policy](docs/session-policy.md)
+- [Email verification architecture](docs/email-verification.md) · [Security hardening](docs/security-hardening.md)
+- [Routing and audit corrections](docs/auth-routing-and-audit.md) · [Database migration guide](docs/database-migrations.md)
+- [Spring Boot upgrade notes](docs/spring-boot-upgrade.md)
 
 ## Run locally
 
