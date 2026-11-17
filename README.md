@@ -1,7 +1,8 @@
 # Secure Auth Service
 
-A Java 17 / Spring Boot 4.1.2 authentication sample with PostgreSQL-backed sessions.
-This is a portfolio project, not a production-ready identity provider.
+A security-focused authentication service built with Java 17 and Spring Boot 4, featuring JWT authentication, refresh token rotation, revocable sessions, Redis rate limiting, email verification, audit logging, and integration tests.
+
+A hands-on portfolio project illustrating secure authentication patterns with PostgreSQL-backed sessions. **Not a production-ready identity provider.**
 
 ## Implemented
 
