@@ -8,7 +8,9 @@ import java.util.UUID;
 @Getter @Setter
 public class MailOutbox {
     @Id private UUID id;
-    @Column(nullable = false) private UUID tokenId;
+    private UUID tokenId;
+    private UUID resetTokenId;
+    @Column(nullable = false) private boolean resetNotice;
     @Column(columnDefinition = "text") private String payload;
     @Column(nullable = false) private int attempts;
     @Column(nullable = false) private Instant nextAttemptAt;

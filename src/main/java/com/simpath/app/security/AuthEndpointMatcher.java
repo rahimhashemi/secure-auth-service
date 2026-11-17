@@ -16,6 +16,10 @@ public final class AuthEndpointMatcher {
             .matcher(HttpMethod.POST, "/auth/email-verification/request");
     private static final PathPatternRequestMatcher VERIFY_CONFIRM = PathPatternRequestMatcher.withDefaults()
             .matcher(HttpMethod.POST, "/auth/email-verification/confirm");
+    private static final PathPatternRequestMatcher RESET_REQUEST = PathPatternRequestMatcher.withDefaults()
+            .matcher(HttpMethod.POST, "/auth/password-reset/request");
+    private static final PathPatternRequestMatcher RESET_CONFIRM = PathPatternRequestMatcher.withDefaults()
+            .matcher(HttpMethod.POST, "/auth/password-reset/confirm");
     private AuthEndpointMatcher() { }
     public static String operation(HttpServletRequest request) {
         if (REGISTER.matches(request)) return "register";
@@ -23,6 +27,8 @@ public final class AuthEndpointMatcher {
         if (REFRESH.matches(request)) return "refresh";
         if (VERIFY_REQUEST.matches(request)) return "verification-request";
         if (VERIFY_CONFIRM.matches(request)) return "verification-confirm";
+        if (RESET_REQUEST.matches(request)) return "password-reset-request";
+        if (RESET_CONFIRM.matches(request)) return "password-reset-confirm";
         return null;
     }
 }

@@ -35,7 +35,7 @@ public class SecurityConfig {
                                 "/swagger-ui/**",
                                 "/swagger-ui.html",
                                 "/auth/**",
-                                "/actuator/health", "/verify-email.html", "/verify-email.js"
+                                "/actuator/health", "/verify-email.html", "/verify-email.js", "/reset-password.html", "/reset-password.js"
                         ).permitAll()
                         .anyRequest().authenticated()
                 )

@@ -54,6 +54,11 @@ public class AuthService {
             throw new com.simpath.app.common.InvalidCredentialsException();
         }
 
+        // Recheck the password hash under the same user lock used by password reset.
+        if (users.lockForLogin(u.getId(), u.getPasswordHash()).isEmpty()) {
+            throw new com.simpath.app.common.InvalidCredentialsException();
+        }
+
         audit.log("LOGIN_SUCCESS", u.getId(), null, ip, userAgent);
 
         RefreshTokenService.IssuedRefresh refresh = refreshTokenService.issueNew(u.getId(), userAgent, ip);

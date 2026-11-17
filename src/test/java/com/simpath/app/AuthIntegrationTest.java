@@ -182,7 +182,7 @@ class AuthIntegrationTest {
     }
 
     @Test void applicationStartsAgainstFlywaySchemaWithoutHibernateCreatingTables() {
-        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("5");
+        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("6");
         assertThat(flyway.info().pending()).isEmpty();
         assertThat(jdbc.queryForObject(
                 "select count(*) from flyway_schema_history where version = '1' and success = true", Integer.class))

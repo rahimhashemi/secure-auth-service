@@ -44,5 +44,19 @@ class AuthLoginTest {
         verify(passwords).hash("correct horse battery staple");
         verify(users).insertIfAbsent(any(), eq("existing@example.com"), eq("hash"), any());
     }
+    @Test void passwordChangedAfterComparisonPreventsSessionCreation() {
+        User user = new User();
+        user.setId(java.util.UUID.randomUUID());
+        user.setEnabled(true);
+        user.setEmailVerified(true);
+        user.setPasswordHash("previous-hash");
+        when(users.findByEmail("user@example.com")).thenReturn(Optional.of(user));
+        when(passwords.matches("old-password", "previous-hash")).thenReturn(true);
+        when(users.lockForLogin(user.getId(), "previous-hash")).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> auth.login(new LoginRequest("user@example.com", "old-password"), "test", "ip"))
+                .isInstanceOf(InvalidCredentialsException.class);
+        verify(users).lockForLogin(user.getId(), "previous-hash");
+    }
 }
 
