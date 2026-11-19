@@ -1,6 +1,6 @@
 # Secure Auth Service
 
-A security-focused authentication service built with Java 17 and Spring Boot 4, featuring JWT authentication, refresh token rotation, revocable sessions, Redis rate limiting, email verification, audit logging, and integration tests.
+A security-focused authentication service built with Java 17 and Spring Boot 4, featuring JWT authentication, refresh token rotation, revocable sessions, Redis rate limiting, email verification, password recovery, audit logging, and integration tests.
 
 A hands-on portfolio project illustrating secure authentication patterns with PostgreSQL-backed sessions. **Not a production-ready identity provider.**
 
@@ -21,6 +21,7 @@ A hands-on portfolio project illustrating secure authentication patterns with Po
 - Versioned PostgreSQL migrations with Flyway and Hibernate schema validation.
 - Active session checks, session listing, selective revocation, and logout of other devices.
 - Hashed one-time email verification links with an AES-GCM-encrypted mail outbox and retry worker.
+- One-time password recovery links that revoke existing sessions and outstanding reset links.
 
 Latest routing/security corrections: [routing and audit repair](docs/auth-routing-and-audit.md).
 
@@ -155,13 +156,14 @@ src/main/java/com/simpath/app/
 │   └── refresh/        # Opaque token hashing, rotation and cleanup
 ├── session/            # PostgreSQL-backed session listing and revocation
 ├── verification/       # Email tokens, encrypted outbox, SMTP worker
+├── passwordreset/      # One-time password recovery and session revocation
 ├── audit/              # Security audit events
 ├── user/               # User persistence and /me
 ├── config/             # Spring Security, JWT and OpenAPI configuration
 └── common/             # API errors and exception handling
 
-src/main/resources/db/migration/    # Versioned Flyway SQL (V1–V5)
-src/main/resources/static/          # Email verification page
+src/main/resources/db/migration/    # Versioned Flyway SQL (V1–V6)
+src/main/resources/static/          # Email verification and password reset pages
 src/test/java/com/simpath/app/      # Unit, HTTP and Testcontainers tests
 docs/                               # Operational and security design notes
 .github/workflows/maven.yml         # Java 17/21 Maven verification
@@ -169,7 +171,7 @@ docs/                               # Operational and security design notes
 
 ## Tests and CI
 
-[GitHub Actions – Java CI with Maven](https://github.com/rahimhashemi/secure-auth-service/actions/workflows/maven.yml) runs `mvn -B verify` on **Java 17 and 21** for pull requests and pushes to `master`. Integration tests use real PostgreSQL and Redis via Testcontainers, so Docker must be available. The suite exercises refresh rotation and concurrent reuse, session revocation, rate-limit atomicity, HTTP security filters, email verification/outbox behavior, and Flyway migration safety.
+[GitHub Actions – Java CI with Maven](https://github.com/rahimhashemi/secure-auth-service/actions/workflows/maven.yml) runs `mvn -B verify` on **Java 17 and 21** for pull requests and pushes to `master`. Integration tests use real PostgreSQL, Redis and Mailpit via Testcontainers, so Docker must be available. The suite exercises refresh rotation and concurrent reuse, session revocation, rate-limit atomicity, HTTP security filters, email verification/outbox behavior, and Flyway migration safety.
 
 The workflow also includes a **separate dependency-graph submission job** on `master`; if GitHub's Dependency Graph is disabled in repository settings, that job may fail even when both Java build/test jobs pass. Inspect the individual job results instead of interpreting the overall badge as a test-only status. Commands and detailed test coverage are in [Tests](#tests).
 
@@ -177,35 +179,105 @@ The workflow also includes a **separate dependency-graph submission job** on `ma
 
 - [Session management and revocation](docs/session-management.md) · [Session policy](docs/session-policy.md)
 - [Email verification architecture](docs/email-verification.md) · [Security hardening](docs/security-hardening.md)
+- [Local setup, troubleshooting and functional tests](docs/local-development.md)
 - [Routing and audit corrections](docs/auth-routing-and-audit.md) · [Database migration guide](docs/database-migrations.md)
 - [Spring Boot upgrade notes](docs/spring-boot-upgrade.md)
 
 ## Run locally
 
-Requires Docker Engine / Docker Desktop and Docker Compose v2. Generate local secrets
-and keep them outside source control:
+Requires Docker Engine / Docker Desktop, Docker Compose v2 and OpenSSL. A host JDK is
+needed for Maven tests; the Dockerfile builds the application with Java 17.
+
+### First setup: persist the secrets
+
+Run this once from the repository root for a **new local database**. It creates a
+private `.env` file without overwriting an existing one. If the five secrets are
+already exported in this terminal from an earlier run, it preserves those values;
+otherwise it generates random hex values.
 
 ```bash
-export POSTGRES_PASSWORD="$(openssl rand -hex 24)"
-export APP_JWT_SECRET="$(openssl rand -hex 32)"
-export APP_REFRESH_PEPPER="$(openssl rand -hex 32)"
-export APP_RATE_LIMIT_ACCOUNT_KEY="$(openssl rand -hex 32)"
-export APP_MAIL_OUTBOX_KEY="$(openssl rand -hex 32)"
-docker compose up --build
+if [ -e .env ] || [ -L .env ]; then
+  printf 'Existing .env kept; reuse its original secrets.\n'
+else
+  (
+    set -eu
+    umask 077
+    set -C
+    {
+      printf 'POSTGRES_PASSWORD=%s\n' "${POSTGRES_PASSWORD:-$(openssl rand -hex 24)}"
+      printf 'APP_JWT_SECRET=%s\n' "${APP_JWT_SECRET:-$(openssl rand -hex 32)}"
+      printf 'APP_REFRESH_PEPPER=%s\n' "${APP_REFRESH_PEPPER:-$(openssl rand -hex 32)}"
+      printf 'APP_RATE_LIMIT_ACCOUNT_KEY=%s\n' "${APP_RATE_LIMIT_ACCOUNT_KEY:-$(openssl rand -hex 32)}"
+      printf 'APP_MAIL_OUTBOX_KEY=%s\n' "${APP_MAIL_OUTBOX_KEY:-$(openssl rand -hex 32)}"
+      printf 'APP_API_DOCS_ENABLED=true\n'
+    } > .env
+  )
+fi
 ```
 
-The Dockerfile builds the JAR; no prebuilt `target` directory is required.
-PostgreSQL and Redis ports are bound to localhost. Redis is required for login
-and refresh rate limiting and Compose waits for its health check.
+**Existing installation:** reuse the original values. If you have lost the exports,
+recover the existing container settings before generating replacements; see
+[environment and database recovery](docs/local-development.md#environment-and-database-recovery).
+`.env.example` lists the supported settings; `.env` is excluded from Git.
 
-- API: http://localhost:8081
-- Swagger (disable with `APP_API_DOCS_ENABLED=false`): http://localhost:8081/swagger-ui.html
-- Health: http://localhost:8081/actuator/health
+Validate the configuration without displaying its secrets, then start the services:
 
-JWT secret and refresh pepper are required configuration. The JWT secret must have
-at least 32 UTF-8 bytes. Database credentials must be configured explicitly; Compose requires
-`POSTGRES_PASSWORD`. Changing the pepper invalidates existing refresh tokens; changing the JWT
-key invalidates existing access tokens. Key rotation is not implemented.
+```bash
+docker info
+docker compose config --quiet
+docker compose up --build -d
+docker compose ps
+curl --fail --silent --show-error \
+  --retry 20 --retry-delay 2 --retry-connrefused --retry-max-time 60 \
+  http://localhost:8081/actuator/health
+```
+
+Wait for `Started AuthServiceApplication` in `docker compose logs --tail=100 app`
+and an HTTP 200 health response with `status: UP`.
+
+### Subsequent runs
+
+Keep `.env` and the database data across runs. Compose reads the file automatically,
+including in a new terminal:
+
+```bash
+docker compose up -d
+docker compose logs --tail=100 -f app
+```
+
+After application source changes, use `docker compose up --build -d`.
+Shell environment variables override values in `.env`; remove stale exports when
+switching to the saved configuration. Replacing the PostgreSQL password in `.env`
+does not change the password already stored in an initialized database.
+
+### Local addresses
+
+Open these URLs **on the computer running Docker**:
+
+| Service | Address / purpose |
+| --- | --- |
+| API | http://localhost:8081 |
+| Swagger UI | http://localhost:8081/swagger-ui.html |
+| Health | http://localhost:8081/actuator/health |
+| Mailpit inbox | http://localhost:8025 |
+| PostgreSQL | localhost:5433, database `authdb`, user `auth` |
+| Redis | localhost:6379 |
+| SMTP inside Compose | `mailpit:1025`; application uses this by default |
+
+Mailpit captures local test email, including messages addressed to Gmail or other
+real email addresses. Read verification and recovery links in the Mailpit inbox.
+Real external delivery requires your own SMTP provider configuration.
+
+Swagger is enabled by default in local Compose; set `APP_API_DOCS_ENABLED=false`
+to disable it. The exposed ports bind to loopback. Redis is required for the rate
+limits; Compose waits for PostgreSQL and Redis health checks.
+
+The five secrets have different roles: PostgreSQL credentials, JWT signing,
+refresh-token hashing, account rate-limit HMACs and outbox encryption. Keep them stable.
+Changing the JWT key invalidates access tokens; changing the refresh pepper invalidates
+refresh tokens; replacing the outbox key makes queued encrypted email unreadable.
+See the [local runbook](docs/local-development.md) for Docker Desktop, registry access,
+Lombok and startup troubleshooting.
 
 ## API examples
 
@@ -214,6 +286,9 @@ curl -X POST localhost:8081/auth/register \
   -H 'Content-Type: application/json' \
   -d '{"email":"test@example.com","password":"Correct-Horse-123!"}'
 
+# Before login: open http://localhost:8025, follow the verification link
+# for this email address and press Confirm email. Expected confirmation: HTTP 204.
+# Login before verification returns HTTP 401 INVALID_CREDENTIALS.
 curl -X POST localhost:8081/auth/login \
   -H 'Content-Type: application/json' \
   -d '{"email":"test@example.com","password":"Correct-Horse-123!"}'
@@ -301,35 +376,58 @@ A baseline records history; it does not repair schema differences.
 
 ## Tests
 
-```bash
-# Full suite: Docker required for PostgreSQL and Redis Testcontainers
-bash mvnw -B verify
+Use a host **JDK 17 or 21**, the versions covered by CI, and a working Docker daemon:
 
-# Filter regression tests without Docker
+```bash
+bash mvnw -v
+docker info
+bash mvnw -B clean verify
+```
+
+On **Linux with Docker Desktop**, explicitly select its socket if Testcontainers
+cannot discover it:
+
+```bash
+DOCKER_HOST="unix://$HOME/.docker/desktop/docker.sock" \
+TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock \
+bash mvnw -B clean verify
+```
+
+Testcontainers starts its own disposable PostgreSQL, Redis and Mailpit containers.
+It uses test configuration independently of Compose and the application's saved
+secrets. It still needs access to every test image, including Ryuk; changing image
+names in `compose.yaml` or `Dockerfile` does not update the test images.
+
+A successful verification ends with `BUILD SUCCESS` and no test failures or errors.
+Check that the integration tests actually ran. A successful `test-compile` only
+confirms compilation. The initial run may take longer while downloading Maven
+dependencies and images.
+
+For filter regression tests without Docker:
+
+```bash
 bash mvnw -B -Dtest=JwtAuthFilterTest,RateLimitFilterTest test
 ```
 
-See [authentication hardening](docs/security-hardening.md) for account throttling, trusted
-proxy configuration, generic registration responses, password policy, cleanup and deployment defaults.
+If Lombok-generated methods such as `AuditEvent.setType` cannot be found, check the
+JDK shown by `bash mvnw -v`. The current POM relies on annotation processor discovery;
+JDK 23+ requires explicit activation. See
+[Lombok compilation troubleshooting](docs/local-development.md#lombok-compilation).
 
-The PostgreSQL integration suite covers expired refresh rejection, rotation and
-persisted reuse revocation, concurrent refresh attempts, disabled users, failed-login
-audit persistence, and rejection of stale tokens for logout-all. Filter tests check
-invalid-token rejection and propagation of downstream failures. CI runs the full suite;
-it does not silently skip database tests when Docker is absent.
+The integration suite covers refresh rotation/reuse and concurrency, immediate
+session revocation, email verification and encrypted mail delivery, one-time password
+reset and revocation of existing sessions, Redis rate-limit atomicity, HTTP filters,
+and Flyway migration safety. It runs migrations with production Hibernate validation.
+The suite does not silently skip database tests when Docker is absent.
 
-Rate-limit tests cover real Redis expiry, exact thresholds, separate IP/operation
-buckets, 40 concurrent attempts through two independent Redis clients, HTTP filter
-wiring, malformed request counting, forwarded-header spoofing, 429 headers, and
-fail-closed behavior when Redis is unavailable.
-
-Migration tests also check empty schema initialization, data retention on repeat
-migration, refusal of unmanaged schemas and checksum mismatch rejection. The auth
-suite runs with Flyway and production Hibernate validation, without `create-drop`.
+See [authentication hardening](docs/security-hardening.md) for throttling, trusted
+proxy configuration, generic responses, password policy and cleanup, and the
+[manual functional checks](docs/local-development.md#manual-functional-checks)
+for the expected HTTP responses.
 
 ## Remaining limitations
 
-- No MFA, password reset, or OAuth2/OIDC support.
+- TOTP MFA, MFA recovery codes, Step-Up sessions and OAuth2/OIDC are not implemented yet.
 - Existing Hibernate databases require verified, manual Flyway adoption; separate migration/runtime DB roles are not configured.
 - Access tokens are checked against PostgreSQL sessions on every authenticated request. Expired history is cleaned in bounded batches.
 - Database locks serialize session operations per user, with no custom lock timeout policy.
@@ -356,29 +454,32 @@ concurrently or roll back the binary: old binaries do not enforce session revoca
 
 ## Email verification
 
-Registration now creates an unverified account. Open [Mailpit](http://localhost:8025),
-follow the email link and press **Confirm email**, then log in. Compose starts the
-local SMTP sink; no external recipient is contacted by Mailpit. The application is
-on port 8081; PostgreSQL is exposed on host 5433 and listens on container 5432.
+Registration creates an unverified account. On the machine running Docker, open
+[Mailpit](http://localhost:8025), find **Verify your email - Secure Auth Service**
+for that exact recipient, follow the link and press **Confirm email**. Allow at least
+one worker poll (normally about ten seconds) for delivery. Then log in.
 
-Set a new independent `APP_MAIL_OUTBOX_KEY` (64 random hex characters) in `.env`:
+For direct API confirmation, send only the **43-character token after `#token=`**
+in the email link as the JSON `token` value. The confirmation page removes the
+fragment from the address bar on load; copy from the email itself. Verification
+tokens expire after 30 minutes and can be used once. Successful confirmation returns
+204 with no body. Invalid, expired or already-consumed tokens, and an already-verified
+or disabled account, return the same `INVALID_VERIFICATION_TOKEN` error.
 
-```bash
-openssl rand -hex 32
-```
+`POST /auth/email-verification/request` accepts an `email` field and returns a
+generic 202. That response does not prove an account exists or email was delivered.
+The account must exist, be enabled and remain unverified. A one-minute per-user
+cooldown and separate IP/account budgets apply. Duplicate registration neither
+changes the original password nor queues another email. Request verification for an
+existing unverified account rather than registering it again.
 
-Keep this key stable across restarts and instances. Do not regenerate your other
-secrets or overwrite an existing `.env`. Then run `docker compose up --build -d`.
-`POST /auth/email-verification/request` accepts `{"email":"test@example.com"}` and
-returns a generic 202. `POST /auth/email-verification/confirm` accepts `{"token":"..."}`
-and returns 204 on success. Tokens expire after 30 minutes and can be used once.
+**V5 cutover:** existing users must verify before signing in; legacy sessions and
+refresh tokens are revoked. Drain old instances before migration. Existing users
+request verification explicitly; the migration does not send a mail blast.
 
-**V5 cutover:** all existing users must verify; existing sessions and refresh tokens
-are revoked. Stop old instances before migration and run only the new version.
-Existing users request a verification email; the migration sends no email blast.
-Configure production SMTP and an HTTPS `APP_VERIFICATION_PUBLIC_URL` before enabling
-registration. Mailpit is a local inbox for testing, not a production mail provider.
-See [verification architecture and operations](docs/email-verification.md).
+For external delivery configure SMTP and an HTTPS `APP_VERIFICATION_PUBLIC_URL`.
+See [verification architecture](docs/email-verification.md) and the
+[local email troubleshooting guide](docs/local-development.md#email-verification).
 
 ### Password reset
 
