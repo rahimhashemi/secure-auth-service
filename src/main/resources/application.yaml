@@ -64,6 +64,8 @@ springdoc:
     enabled: ${APP_API_DOCS_ENABLED:true}
 
 app:
+  session:
+    step-up-ttl-seconds: ${APP_STEP_UP_TTL_SECONDS:300}
   mfa:
     encryption-key: ${APP_MFA_ENCRYPTION_KEY}
     recovery-pepper: ${APP_MFA_RECOVERY_PEPPER}

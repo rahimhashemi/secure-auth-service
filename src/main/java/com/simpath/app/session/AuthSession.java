@@ -17,6 +17,7 @@ public class AuthSession {
     @Column(nullable = false) private Instant lastSeenAt;
     @Column(nullable = false) private Instant expiresAt;
     private Instant revokedAt;
+    private Instant lastStepUpAt;
     @Column(length = 255) private String userAgent;
     @Column(length = 255) private String ip;
 }

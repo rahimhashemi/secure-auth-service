@@ -15,8 +15,14 @@ public class SessionService {
     private final SessionRepository sessions;
     private final UserRepository users;
     private final RefreshTokenRepository tokens;
+    private final int stepUpTtlSeconds;
 
-    public SessionService(SessionRepository sessions, UserRepository users, RefreshTokenRepository tokens) {
+    public SessionService(SessionRepository sessions, UserRepository users, RefreshTokenRepository tokens,
+            @org.springframework.beans.factory.annotation.Value("${app.session.step-up-ttl-seconds:300}") int stepUpTtlSeconds) {
+        if (stepUpTtlSeconds < 60 || stepUpTtlSeconds > 3600) {
+            throw new IllegalArgumentException("Step-up TTL must be 60..3600 seconds");
+        }
+        this.stepUpTtlSeconds = stepUpTtlSeconds;
         this.sessions = sessions;
         this.users = users;
         this.tokens = tokens;
@@ -38,6 +44,8 @@ public class SessionService {
         session.setUserId(userId);
         session.setCreatedAt(Instant.now());
         session.setLastSeenAt(session.getCreatedAt());
+        // Password (and, when enrolled, MFA) was freshly verified to create this session.
+        session.setLastStepUpAt(session.getCreatedAt());
         session.setExpiresAt(expiry);
         session.setUserAgent(truncate(userAgent));
         session.setIp(truncate(ip));
@@ -50,6 +58,46 @@ public class SessionService {
         if (session.getRevokedAt() != null || !session.getExpiresAt().isAfter(Instant.now())) throw new InvalidSessionException();
         session.setExpiresAt(expiry);
         session.setLastSeenAt(Instant.now());
+    }
+
+    @Transactional(readOnly = true)
+    public StepUpDtos.StatusResponse stepUpStatus(UUID userId, UUID sessionId) {
+        AuthSession session = activeForStepUp(userId, sessionId);
+        Instant now = Instant.now();
+        Instant until = session.getLastStepUpAt() == null ? null :
+                earlier(session.getLastStepUpAt().plusSeconds(stepUpTtlSeconds), session.getExpiresAt());
+        return new StepUpDtos.StatusResponse(until != null && until.isAfter(now),
+                until != null && until.isAfter(now) ? until : null);
+    }
+
+    @Transactional
+    public Instant grantStepUp(UUID userId, UUID sessionId) {
+        AuthSession session = activeForStepUp(userId, sessionId);
+        Instant now = Instant.now();
+        session.setLastStepUpAt(now);
+        return earlier(now.plusSeconds(stepUpTtlSeconds), session.getExpiresAt());
+    }
+
+    @Transactional(readOnly = true)
+    public void requireRecentStepUp(UUID userId, UUID sessionId) {
+        AuthSession session = activeForStepUp(userId, sessionId);
+        if (session.getLastStepUpAt() == null ||
+                !session.getLastStepUpAt().plusSeconds(stepUpTtlSeconds).isAfter(Instant.now())) {
+            throw new StepUpRequiredException();
+        }
+    }
+
+    private AuthSession activeForStepUp(UUID userId, UUID sessionId) {
+        AuthSession session = sessions.findByIdAndUserId(sessionId, userId)
+                .orElseThrow(InvalidSessionException::new);
+        if (session.getRevokedAt() != null || !session.getExpiresAt().isAfter(Instant.now())) {
+            throw new InvalidSessionException();
+        }
+        return session;
+    }
+
+    private Instant earlier(Instant first, Instant second) {
+        return first.isBefore(second) ? first : second;
     }
 
     @Transactional(readOnly = true)
@@ -79,6 +127,7 @@ public class SessionService {
     public void revokeManaged(UUID userId, UUID callerId, UUID targetId) {
         lockUser(userId);
         authorizeRead(userId, callerId);
+        requireRecentStepUp(userId, callerId);
         revoke(userId, targetId);
     }
 
@@ -86,6 +135,7 @@ public class SessionService {
     public void revokeOtherSessions(UUID userId, UUID callerId) {
         lockUser(userId);
         authorizeRead(userId, callerId);
+        requireRecentStepUp(userId, callerId);
         sessions.revokeOthers(userId, callerId, Instant.now());
         tokens.revokeExcept(userId, callerId, Instant.now());
     }

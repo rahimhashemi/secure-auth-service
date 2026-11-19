@@ -164,6 +164,14 @@ public class MfaService {
         return new AuthResponse(access, jwt.getAccessTtlSeconds(), refresh.refreshTokenPlain(), refresh.expiresInSeconds());
     }
 
+    // Step-up accepts only a fresh authenticator code, not an emergency recovery code.
+    // A user row lock is required for cross-instance TOTP replay prevention.
+    @Transactional
+    public boolean verifyTotpForStepUp(UUID userId, String code) {
+        activeLockedUser(userId);
+        return verifyFactor(enabledFactor(userId), code, false);
+    }
+
     @Transactional
     public MfaDtos.RecoveryResponse regenerate(UUID userId, String password, String code, String ip, String agent) {
         User user = activeLockedUser(userId);
