@@ -21,8 +21,9 @@ public class AuthService {
     private final RefreshTokenService refreshTokenService;
     private final AuditService audit;
     private final com.simpath.app.security.RateLimitService rateLimits;
+    private final com.simpath.app.mfa.MfaService mfa;
 
-    public AuthService(UserRepository users, PasswordService passwordService, JwtService jwtService, RefreshTokenService refreshTokenService, AuditService audit, com.simpath.app.security.RateLimitService rateLimits, com.simpath.app.verification.VerificationService verification) {
+    public AuthService(UserRepository users, PasswordService passwordService, JwtService jwtService, RefreshTokenService refreshTokenService, AuditService audit, com.simpath.app.security.RateLimitService rateLimits, com.simpath.app.verification.VerificationService verification, com.simpath.app.mfa.MfaService mfa) {
         this.users = users;
         this.verification = verification;
         this.passwordService = passwordService;
@@ -30,6 +31,7 @@ public class AuthService {
         this.refreshTokenService = refreshTokenService;
         this.audit = audit;
         this.rateLimits = rateLimits;
+        this.mfa = mfa;
     }
 
     @Transactional
@@ -57,6 +59,12 @@ public class AuthService {
         // Recheck the password hash under the same user lock used by password reset.
         if (users.lockForLogin(u.getId(), u.getPasswordHash()).isEmpty()) {
             throw new com.simpath.app.common.InvalidCredentialsException();
+        }
+
+        if (mfa.isEnabled(u.getId())) {
+            String challenge = mfa.issueChallenge(u);
+            audit.log("LOGIN_MFA_REQUIRED", u.getId(), null, ip, userAgent);
+            return AuthResponse.mfaRequired(challenge);
         }
 
         audit.log("LOGIN_SUCCESS", u.getId(), null, ip, userAgent);
