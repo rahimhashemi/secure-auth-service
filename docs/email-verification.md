@@ -20,8 +20,10 @@ no third-party assets are loaded, and links use a configured origin rather than 
 The origin must be HTTPS except for loopback development. Email scanners executing
 only GET requests do not consume tokens. A compromised mailbox or client remains
 outside the protection of email verification. Never confirm an unexpected registration.
-A pre-registered account's password is not reset by verification; password recovery is
-a separate future feature. Existing users retain their existing password.
+A pre-registered account's password is not reset by verification. Password recovery
+is a separate implemented flow: a one-time 15-minute link changes the password and
+revokes existing sessions. Existing users retain their password until that flow is
+successfully completed. See the README's password reset section.
 
 ## Abuse limits and responses
 
