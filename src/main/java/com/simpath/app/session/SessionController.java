@@ -17,11 +17,33 @@ public class SessionController {
     private final SessionService sessions;
     private final AuditService audit;
     private final ClientAddressResolver addresses;
+    private final StepUpService stepUp;
 
-    public SessionController(SessionService sessions, AuditService audit, ClientAddressResolver addresses) {
+    public SessionController(SessionService sessions, AuditService audit, ClientAddressResolver addresses, StepUpService stepUp) {
         this.sessions = sessions;
         this.audit = audit;
         this.addresses = addresses;
+        this.stepUp = stepUp;
+    }
+
+    @GetMapping("/step-up")
+    public org.springframework.http.ResponseEntity<StepUpDtos.StatusResponse> stepUpStatus(
+            @AuthenticationPrincipal AuthPrincipal principal) {
+        return org.springframework.http.ResponseEntity.ok()
+                .cacheControl(org.springframework.http.CacheControl.noStore())
+                .body(sessions.stepUpStatus(UUID.fromString(principal.userId()),
+                        UUID.fromString(principal.sessionId())));
+    }
+
+    @PostMapping("/step-up")
+    public org.springframework.http.ResponseEntity<StepUpDtos.Response> elevate(
+            @AuthenticationPrincipal AuthPrincipal principal,
+            @jakarta.validation.Valid @RequestBody StepUpDtos.Request body, HttpServletRequest request) {
+        return org.springframework.http.ResponseEntity.ok()
+                .cacheControl(org.springframework.http.CacheControl.noStore())
+                .body(stepUp.elevate(UUID.fromString(principal.userId()), UUID.fromString(principal.sessionId()),
+                        body.getPassword(), body.getCode(), addresses.resolve(request),
+                        request.getHeader("User-Agent")));
     }
 
     @GetMapping

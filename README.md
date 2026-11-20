@@ -24,8 +24,9 @@ A hands-on portfolio project illustrating secure authentication patterns with Po
 - One-time password recovery links that revoke existing sessions and outstanding reset links.
 - TOTP MFA, encrypted per-user seeds, hashed one-time recovery codes and password-authenticated five-minute challenges.
 - MFA lifecycle changes revoke existing sessions; password reset does not disable MFA.
+- Session-scoped Step-Up reauthentication with a five-minute freshness window for sensitive session revocation, never extended by refresh.
 
-[TOTP MFA architecture, API contracts and operations](docs/totp-mfa.md).
+[TOTP MFA architecture, API contracts and operations](docs/totp-mfa.md) · [Step-Up Session](docs/step-up-session.md).
 
 Latest routing/security corrections: [routing and audit repair](docs/auth-routing-and-audit.md).
 
@@ -167,7 +168,7 @@ src/main/java/com/simpath/app/
 ├── config/             # Spring Security, JWT and OpenAPI configuration
 └── common/             # API errors and exception handling
 
-src/main/resources/db/migration/    # Versioned Flyway SQL (V1–V7)
+src/main/resources/db/migration/    # Versioned Flyway SQL (V1–V8)
 src/main/resources/static/          # Email verification and password reset pages
 src/test/java/com/simpath/app/      # Unit, HTTP and Testcontainers tests
 docs/                               # Operational and security design notes

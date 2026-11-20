@@ -28,6 +28,18 @@ public class GlobalExceptionHandler extends org.springframework.web.servlet.mvc.
                 "Invalid or expired password reset token.", req.getRequestURI()));
     }
 
+    @ExceptionHandler(com.simpath.app.session.StepUpRequiredException.class)
+    public ResponseEntity<ApiError> stepUpRequired(com.simpath.app.session.StepUpRequiredException ex, HttpServletRequest req) {
+        return ResponseEntity.status(403).header("Cache-Control", "no-store")
+                .body(ApiError.of("STEP_UP_REQUIRED", "Recent reauthentication required.", req.getRequestURI()));
+    }
+
+    @ExceptionHandler(com.simpath.app.session.InvalidStepUpException.class)
+    public ResponseEntity<ApiError> invalidStepUp(com.simpath.app.session.InvalidStepUpException ex, HttpServletRequest req) {
+        return ResponseEntity.status(401).header("Cache-Control", "no-store")
+                .body(ApiError.of("INVALID_STEP_UP", "Invalid reauthentication credentials.", req.getRequestURI()));
+    }
+
     @ExceptionHandler(com.simpath.app.mfa.InvalidMfaException.class)
     public ResponseEntity<ApiError> invalidMfa(com.simpath.app.mfa.InvalidMfaException ex, HttpServletRequest req) {
         return ResponseEntity.status(401).header("Cache-Control", "no-store")
