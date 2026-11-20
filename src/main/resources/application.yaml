@@ -64,6 +64,9 @@ springdoc:
     enabled: ${APP_API_DOCS_ENABLED:true}
 
 app:
+  mfa:
+    encryption-key: ${APP_MFA_ENCRYPTION_KEY}
+    recovery-pepper: ${APP_MFA_RECOVERY_PEPPER}
   verification:
     outbox-key: ${APP_MAIL_OUTBOX_KEY}
     public-url: ${APP_VERIFICATION_PUBLIC_URL:http://localhost:8081/verify-email.html}

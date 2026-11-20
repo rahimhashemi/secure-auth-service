@@ -70,7 +70,7 @@ public class RateLimitService {
     public long check(String operation, String remoteAddress) {
         if (!enabled) return 0;
         int limit = switch (operation) {
-            case "login" -> loginLimit;
+            case "login", "mfa-verify" -> loginLimit;
             case "register", "verification-request", "password-reset-request" -> registerLimit;
             case "verification-confirm", "password-reset-confirm" -> refreshLimit;
             case "refresh" -> refreshLimit;

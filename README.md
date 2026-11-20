@@ -22,6 +22,10 @@ A hands-on portfolio project illustrating secure authentication patterns with Po
 - Active session checks, session listing, selective revocation, and logout of other devices.
 - Hashed one-time email verification links with an AES-GCM-encrypted mail outbox and retry worker.
 - One-time password recovery links that revoke existing sessions and outstanding reset links.
+- TOTP MFA, encrypted per-user seeds, hashed one-time recovery codes and password-authenticated five-minute challenges.
+- MFA lifecycle changes revoke existing sessions; password reset does not disable MFA.
+
+[TOTP MFA architecture, API contracts and operations](docs/totp-mfa.md).
 
 Latest routing/security corrections: [routing and audit repair](docs/auth-routing-and-audit.md).
 
@@ -157,12 +161,13 @@ src/main/java/com/simpath/app/
 ├── session/            # PostgreSQL-backed session listing and revocation
 ├── verification/       # Email tokens, encrypted outbox, SMTP worker
 ├── passwordreset/      # One-time password recovery and session revocation
+├── mfa/                # TOTP setup, challenges and recovery codes
 ├── audit/              # Security audit events
 ├── user/               # User persistence and /me
 ├── config/             # Spring Security, JWT and OpenAPI configuration
 └── common/             # API errors and exception handling
 
-src/main/resources/db/migration/    # Versioned Flyway SQL (V1–V6)
+src/main/resources/db/migration/    # Versioned Flyway SQL (V1–V7)
 src/main/resources/static/          # Email verification and password reset pages
 src/test/java/com/simpath/app/      # Unit, HTTP and Testcontainers tests
 docs/                               # Operational and security design notes
@@ -191,7 +196,7 @@ needed for Maven tests; the Dockerfile builds the application with Java 17.
 ### First setup: persist the secrets
 
 Run this once from the repository root for a **new local database**. It creates a
-private `.env` file without overwriting an existing one. If the five secrets are
+private `.env` file without overwriting an existing one. If the seven secrets are
 already exported in this terminal from an earlier run, it preserves those values;
 otherwise it generates random hex values.
 
@@ -209,13 +214,24 @@ else
       printf 'APP_REFRESH_PEPPER=%s\n' "${APP_REFRESH_PEPPER:-$(openssl rand -hex 32)}"
       printf 'APP_RATE_LIMIT_ACCOUNT_KEY=%s\n' "${APP_RATE_LIMIT_ACCOUNT_KEY:-$(openssl rand -hex 32)}"
       printf 'APP_MAIL_OUTBOX_KEY=%s\n' "${APP_MAIL_OUTBOX_KEY:-$(openssl rand -hex 32)}"
+      printf 'APP_MFA_ENCRYPTION_KEY=%s\n' "${APP_MFA_ENCRYPTION_KEY:-$(openssl rand -hex 32)}"
+      printf 'APP_MFA_RECOVERY_PEPPER=%s\n' "${APP_MFA_RECOVERY_PEPPER:-$(openssl rand -hex 32)}"
       printf 'APP_API_DOCS_ENABLED=true\n'
     } > .env
   )
 fi
 ```
 
-**Existing installation:** reuse the original values. If you have lost the exports,
+**Existing installation:** reuse the original values. On an existing pre-MFA install,
+add two *new* independent secrets to `.env` without replacing the old ones:
+
+```bash
+grep -q '^APP_MFA_ENCRYPTION_KEY=' .env || printf 'APP_MFA_ENCRYPTION_KEY=%s\\n' "$(openssl rand -hex 32)" >> .env
+grep -q '^APP_MFA_RECOVERY_PEPPER=' .env || printf 'APP_MFA_RECOVERY_PEPPER=%s\\n' "$(openssl rand -hex 32)" >> .env
+chmod 600 .env
+```
+
+If you have lost the exports,
 recover the existing container settings before generating replacements; see
 [environment and database recovery](docs/local-development.md#environment-and-database-recovery).
 `.env.example` lists the supported settings; `.env` is excluded from Git.
@@ -272,8 +288,8 @@ Swagger is enabled by default in local Compose; set `APP_API_DOCS_ENABLED=false`
 to disable it. The exposed ports bind to loopback. Redis is required for the rate
 limits; Compose waits for PostgreSQL and Redis health checks.
 
-The five secrets have different roles: PostgreSQL credentials, JWT signing,
-refresh-token hashing, account rate-limit HMACs and outbox encryption. Keep them stable.
+The seven secrets have different roles: PostgreSQL credentials, JWT signing,
+refresh-token hashing, account rate-limit HMACs, outbox encryption, TOTP seed encryption and recovery-code HMAC hashing. Keep them stable.
 Changing the JWT key invalidates access tokens; changing the refresh pepper invalidates
 refresh tokens; replacing the outbox key makes queued encrypted email unreadable.
 See the [local runbook](docs/local-development.md) for Docker Desktop, registry access,

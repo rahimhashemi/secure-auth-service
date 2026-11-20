@@ -27,12 +27,16 @@ public class AuthController {
     }
 
     @PostMapping("/login")
-    public AuthResponse login(@Valid @RequestBody LoginRequest req, HttpServletRequest http) {
+    public AuthResponse login(@Valid @RequestBody LoginRequest req, HttpServletRequest http,
+                              jakarta.servlet.http.HttpServletResponse response) {
+        response.setHeader("Cache-Control", "no-store");
         return auth.login(req, http.getHeader("User-Agent"), addresses.resolve(http));
     }
 
     @PostMapping("/refresh")
-    public AuthResponse refresh(@Valid @RequestBody RefreshRequest req, HttpServletRequest http) {
+    public AuthResponse refresh(@Valid @RequestBody RefreshRequest req, HttpServletRequest http,
+                                jakarta.servlet.http.HttpServletResponse response) {
+        response.setHeader("Cache-Control", "no-store");
         return auth.refresh(req, http.getHeader("User-Agent"), addresses.resolve(http));
     }
 

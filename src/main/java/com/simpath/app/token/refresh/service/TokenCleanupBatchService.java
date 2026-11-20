@@ -12,12 +12,14 @@ public class TokenCleanupBatchService {
     private final com.simpath.app.passwordreset.PasswordResetRepository resets;
     private final com.simpath.app.verification.VerificationRepository verification;
     private final com.simpath.app.session.SessionRepository sessions;
+    private final com.simpath.app.mfa.MfaLoginChallengeRepository challenges;
 
-    public TokenCleanupBatchService(RefreshTokenRepository tokens, com.simpath.app.session.SessionRepository sessions, com.simpath.app.verification.VerificationRepository verification, com.simpath.app.passwordreset.PasswordResetRepository resets) {
+    public TokenCleanupBatchService(RefreshTokenRepository tokens, com.simpath.app.session.SessionRepository sessions, com.simpath.app.verification.VerificationRepository verification, com.simpath.app.passwordreset.PasswordResetRepository resets, com.simpath.app.mfa.MfaLoginChallengeRepository challenges) {
         this.tokens = tokens;
         this.resets = resets;
         this.verification = verification;
         this.sessions = sessions;
+        this.challenges = challenges;
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
@@ -26,6 +28,7 @@ public class TokenCleanupBatchService {
         int sessionCount = sessions.deleteExpiredBatch(cutoff, batchSize);
         int verificationCount = verification.deleteExpired(cutoff, batchSize);
         int resetCount = resets.deleteExpired(cutoff, batchSize);
-        return Math.max(Math.max(tokenCount, sessionCount), Math.max(verificationCount, resetCount));
+        int challengeCount = challenges.deleteExpired(cutoff, batchSize);
+        return Math.max(Math.max(tokenCount, sessionCount), Math.max(Math.max(verificationCount, resetCount), challengeCount));
     }
 }
